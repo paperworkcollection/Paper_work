@@ -1,0 +1,36 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.paperwork.mobile.app-mergeDebugResources-2:/values/values.xml",
+            "map": [
+                {
+                    "source": "C:\\Users\\susha\\Downloads\\PaperWork-Google-Sheets-Navigation-Fixed (1)\\android\\app\\src\\main\\res\\values\\colors.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "60",
+                        "endOffsets": "111"
+                    }
+                },
+                {
+                    "source": "C:\\Users\\susha\\Downloads\\PaperWork-Google-Sheets-Navigation-Fixed (1)\\android\\app\\src\\main\\res\\values\\strings.xml",
+                    "from": {
+                        "startLines": "3,1",
+                        "startColumns": "4,4",
+                        "startOffsets": "152,16",
+                        "endColumns": "77,47",
+                        "endOffsets": "225,59"
+                    },
+                    "to": {
+                        "startLines": "3,4",
+                        "startColumns": "4,4",
+                        "startOffsets": "116,194",
+                        "endColumns": "77,47",
+                        "endOffsets": "189,237"
+                    }
+                }
+            ]
+        }
+    ]
+}

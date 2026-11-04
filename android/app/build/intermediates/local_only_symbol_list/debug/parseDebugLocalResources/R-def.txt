@@ -1,0 +1,7 @@
+R_DEF: Internal format may change without notice
+local
+color paper_work_icon_background
+mipmap ic_launcher
+mipmap ic_launcher_foreground
+string api_base_url
+string app_name

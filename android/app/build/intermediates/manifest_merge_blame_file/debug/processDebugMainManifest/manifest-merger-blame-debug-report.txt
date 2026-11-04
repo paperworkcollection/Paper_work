@@ -1,0 +1,62 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.paperwork.mobile"
+4    android:versionCode="1"
+5    android:versionName="1.0.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="24"
+9        android:targetSdkVersion="35" />
+10
+11    <uses-permission android:name="android.permission.INTERNET" />
+11-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:2:5-67
+11-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:2:22-64
+12    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+12-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:3:5-79
+12-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:3:22-76
+13    <uses-permission
+13-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:4:5-108
+14        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+14-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:4:22-78
+15        android:maxSdkVersion="28" />
+15-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:4:79-105
+16
+17    <application
+17-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:5-9:19
+18        android:allowBackup="false"
+18-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:93-120
+19        android:debuggable="true"
+20        android:extractNativeLibs="false"
+21        android:icon="@mipmap/ic_launcher"
+21-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:18-52
+22        android:label="@string/app_name"
+22-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:121-153
+23        android:roundIcon="@mipmap/ic_launcher"
+23-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:53-92
+24        android:testOnly="true"
+25        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+25-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:154-217
+26        android:usesCleartextTraffic="false" >
+26-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:218-254
+27        <activity
+27-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:9-8:20
+28            android:name="com.paperwork.mobile.MainActivity"
+28-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:19-47
+29            android:configChanges="orientation|screenSize|keyboardHidden"
+29-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:48-109
+30            android:exported="true" >
+30-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:110-133
+31            <intent-filter>
+31-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:13-156
+32                <action android:name="android.intent.action.MAIN" />
+32-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:28-80
+32-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:36-77
+33
+34                <category android:name="android.intent.category.LAUNCHER" />
+34-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:80-140
+34-->C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:90-137
+35            </intent-filter>
+36        </activity>
+37    </application>
+38
+39</manifest>

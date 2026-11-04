@@ -1,0 +1,5 @@
+com.paperwork.mobile:string/app_name = 0x7f030001
+com.paperwork.mobile:mipmap/ic_launcher_foreground = 0x7f020001
+com.paperwork.mobile:mipmap/ic_launcher = 0x7f020000
+com.paperwork.mobile:string/api_base_url = 0x7f030000
+com.paperwork.mobile:color/paper_work_icon_background = 0x7f010000
