@@ -11,8 +11,39 @@ async function login(email,password){const j=await api('/api/auth/login',{method
 function fileRow(d){return `<div class="upload-row"><div class="file-thumb">${d.mimeType?.startsWith('image/')?'▧':'▤'}</div><div class="file-info"><strong>${esc(d.originalName||d.title)}</strong><span>${esc(d.store?.name||'Your store')} · ${fmt(d.documentDate||d.createdAt)}</span></div><button class="row-action" data-preview="${d.id}">View</button><button class="row-action" data-download="${d.id}">↓</button></div>`;}
 async function loadHome(){try{const docs=await api('/api/documents');state.docs=docs;$('#homeUploads').innerHTML=docs.slice(0,10).map(fileRow).join('')||'<div class="empty-state">No uploads yet.</div>';if(admin()){$('#adminStoreCount').textContent=state.stores.length;$('#adminFileCount').textContent=docs.length;const d=await api('/api/drive/status');$('#driveStatus').textContent=d.connected?`Connected${d.email?` as ${d.email}`:''}`:'Not connected — connect the Google account where monthly workbooks should be stored.';$('#connectDrive').textContent=d.connected?'Reconnect Google Drive':'Connect Google Drive';}}catch(e){toast(e.message,true)}}
 async function loadStores(){try{state.stores=await api('/api/stores');renderStores();}catch(e){toast(e.message,true)}}function renderStores(){const q=($('#storeSearch').value||'').toLowerCase();const list=state.stores.filter(s=>s.name.toLowerCase().includes(q));$('#storeCards').innerHTML=list.map(s=>`<button class="store-card" data-open-store="${s.id}"><span class="store-card-icon">▣</span><span class="store-card-text"><strong>${esc(s.name)}</strong><small>${s._count?.documents||0} uploaded files</small></span><span class="store-card-arrow">→</span></button>`).join('')||'<div class="empty-state">No stores found.</div>';}
-async function openStore(id){state.selectedStore=state.stores.find(s=>s.id===id)||await api('/api/stores').then(a=>a.find(s=>s.id===id));nav('store-detail');}
-async function loadStoreDetail(){if(!state.selectedStore)return;$('#storeTitle').textContent=state.selectedStore.name;const months=['January','February','March','April','May','June','July','August','September','October','November','December'];if(!$('#monthYear').options.length){const currentYear=new Date().getFullYear();$('#monthYear').innerHTML=Array.from({length:12},(_,i)=>currentYear+5-i).map(y=>`<option value="${y}" ${y===currentYear?'selected':''}>${y}${y===currentYear?' (Current year)':''}</option>`).join('');}const y=Number($('#monthYear').value)||new Date().getFullYear();$('#monthCards').innerHTML=months.map((m,i)=>`<button class="month-card" data-month="${i+1}"><span>${m}</span><small>${y}</small><b>Edit workbook →</b></button>`).join('');$('#workbookEditor').classList.add('hidden');const docs=await api(`/api/documents?storeId=${encodeURIComponent(state.selectedStore.id)}`);$('#storeUploads').innerHTML=docs.map(fileRow).join('')||'<div class="empty-state">No files uploaded for this store yet.</div>';}
+async function openStore(id) {
+  try {
+    let stores = state.stores;
+
+    let selected = stores.find(s => String(s.id ?? s._id) === String(id));
+
+    if (!selected) {
+      stores = await api('/api/stores');
+      state.stores = stores;
+      selected = stores.find(s => String(s.id ?? s._id) === String(id));
+    }
+
+    if (!selected) {
+      throw new Error('Store not found. Please refresh the store list.');
+    }
+
+   state.selectedStore = {
+  ...selected,
+  id: selected.id ?? selected._id
+};
+
+nav('store-detail');
+  } catch (e) {
+    toast(e.message || 'Could not open this store.', true);
+  }
+}
+async function loadStoreDetail(){if(!state.selectedStore)return;$('#storeTitle').textContent=state.selectedStore.name;const months=['January','February','March','April','May','June','July','August','September','October','November','December'];if(!$('#monthYear').options.length){const currentYear=new Date().getFullYear();$('#monthYear').innerHTML=Array.from({length:12},(_,i)=>currentYear+5-i).map(y=>`<option value="${y}" ${y===currentYear?'selected':''}>${y}${y===currentYear?' (Current year)':''}</option>`).join('');}const y=Number($('#monthYear').value)||new Date().getFullYear();$('#monthCards').innerHTML=months.map((m,i)=>`<button class="month-card" data-month="${i+1}"><span>${m}</span><small>${y}</small><b>Edit workbook →</b></button>`).join('');$('#workbookEditor').classList.add('hidden');const storeId = state.selectedStore.id ?? state.selectedStore._id;
+
+if (!storeId) {
+  throw new Error('Store ID is missing. Please check the stores API response.');
+}
+
+const docs = await api(`/api/documents?storeId=${encodeURIComponent(storeId)}`);$('#storeUploads').innerHTML=docs.map(fileRow).join('')||'<div class="empty-state">No files uploaded for this store yet.</div>';}
 let activeWorkbookMonth=null,activeWorkbookYear=null,activeWorkbookRows=[];
 function renderWorkbookRows(){const host=$('#workbookRows');host.innerHTML=activeWorkbookRows.map((r,i)=>`<div class="workbook-row" data-row="${i}"><label>Report date<input type="date" data-field="reportDate" value="${esc(r['Report Date']||'')}"></label><label>File name<input readonly value="${esc(r['File Name']||'')}" placeholder="No file uploaded"></label><label class="wide">Slip details<textarea data-field="slipDetails" placeholder="Enter slip details"></textarea></label><label>Amount<input type="number" step="0.01" data-field="amount" value="${esc(r.Amount??'')}"></label><label>Currency<input data-field="currency" value="${esc(r.Currency||'USD')}"></label><label class="wide">Notes<textarea data-field="notes">${esc(r.Notes||'')}</textarea></label><label>Entered by<input data-field="enteredBy" value="${esc(r['Entered By']||'')}"></label></div>`).join('');host.querySelectorAll('[data-field]').forEach(el=>el.addEventListener('input',()=>{const row=Number(el.closest('[data-row]').dataset.row),field=el.dataset.field;const key=({reportDate:'Report Date',slipDetails:'Slip Details',amount:'Amount',currency:'Currency',notes:'Notes',enteredBy:'Entered By'})[field];activeWorkbookRows[row][key]=el.value;}));}
 async function openMonth(month){try{const y=Number($('#monthYear').value)||new Date().getFullYear(),m=Number(month);const r=await api(`/api/stores/${state.selectedStore.id}/monthly-sheet?year=${y}&month=${m}`);window.location.href=r.url;}catch(e){toast(e.message,true)}}
