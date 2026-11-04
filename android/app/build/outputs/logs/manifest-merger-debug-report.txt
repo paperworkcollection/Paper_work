@@ -1,0 +1,71 @@
+-- Merging decision tree log ---
+manifest
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:1:1-10:12
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:1:1-10:12
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:1:1-10:12
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:1:1-10:12
+	package
+		INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+	android:versionName
+		INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+	android:versionCode
+		INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+	xmlns:android
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:1:11-69
+uses-permission#android.permission.INTERNET
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:2:5-67
+	android:name
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:2:22-64
+uses-permission#android.permission.ACCESS_NETWORK_STATE
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:3:5-79
+	android:name
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:3:22-76
+uses-permission#android.permission.WRITE_EXTERNAL_STORAGE
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:4:5-108
+	android:maxSdkVersion
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:4:79-105
+	android:name
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:4:22-78
+application
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:5-9:19
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:5-9:19
+	android:extractNativeLibs
+		INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+	android:label
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:121-153
+	android:roundIcon
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:53-92
+	android:icon
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:18-52
+	android:allowBackup
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:93-120
+	android:theme
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:154-217
+	android:usesCleartextTraffic
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:5:218-254
+activity#com.paperwork.mobile.MainActivity
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:9-8:20
+	android:exported
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:110-133
+	android:configChanges
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:48-109
+	android:name
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:6:19-47
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:13-156
+action#android.intent.action.MAIN
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:28-80
+	android:name
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:36-77
+category#android.intent.category.LAUNCHER
+ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:80-140
+	android:name
+		ADDED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml:7:90-137
+uses-sdk
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from C:\Users\susha\Downloads\PaperWork-Google-Sheets-Navigation-Fixed (1)\android\app\src\main\AndroidManifest.xml
