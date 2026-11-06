@@ -482,3 +482,527 @@ function addStore() {
     }
   );
 }
+// EDIT STORE
+async function editStore(id) {
+  const store = state.stores.find(s => String(idOf(s)) === String(id));
+
+  if (!store) {
+    toast('Store not found.', true);
+    return;
+  }
+
+  openModal(
+    'Edit store',
+    `<label class="full-field">
+      Store name
+      <input name="name" required value="${esc(store.name)}">
+    </label>`,
+    async form => {
+      await api(`/api/stores/${encodeURIComponent(id)}`, {
+        method:'PATCH',
+        body:JSON.stringify({name:form.get('name')})
+      });
+
+      await loadStores();
+      toast('Store updated.');
+    }
+  );
+}
+
+// ACTIVATE / DEACTIVATE STORE
+
+async function toggleStore(id, active) {
+  const action = active ? 'deactivate' : 'activate';
+
+  if (!confirm(`Are you sure you want to ${action} this store?`)) {
+    return;
+  }
+
+  try {
+    await api(`/api/stores/${encodeURIComponent(id)}`, {
+      method:'PATCH',
+      body:JSON.stringify({active:!active})
+    });
+
+    await loadStores();
+    toast(`Store ${action}d.`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// DELETE STORE
+
+async function deleteStore(id) {
+  const store = state.stores.find(s => String(idOf(s)) === String(id));
+
+  if (!store) {
+    toast('Store not found.', true);
+    return;
+  }
+
+  const confirmed = confirm(
+    `PERMANENT DELETION\n\n` +
+    `Delete "${store.name}"?\n\n` +
+    `This action also deletes associated file records and uploaded files. ` +
+    `It cannot be undone from Paper Work.\n\n` +
+    `Make sure you have a backup before continuing.`
+  );
+
+  if (!confirmed) return;
+
+  try {
+    await api(`/api/stores/${encodeURIComponent(id)}`, {
+      method:'DELETE'
+    });
+
+    await loadStores();
+    toast('Store deleted.');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// FILE MANAGEMENT
+
+async function loadUploads() {
+  try {
+    const docs = await api('/api/documents');
+    state.docs = Array.isArray(docs) ? docs : [];
+
+    $('#allUploads').innerHTML =
+      state.docs.map(fileRow).join('') ||
+      '<div class="empty-state">No uploaded files found.</div>';
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function editFile(id) {
+  const doc = state.docs.find(d => String(idOf(d)) === String(id));
+
+  if (!doc) {
+    toast('File record not found. Refresh the list and try again.', true);
+    return;
+  }
+
+  openModal(
+    'Edit file details',
+    `<label class="full-field">
+      File name
+      <input name="originalName" required value="${esc(doc.originalName || '')}">
+    </label>
+    <label class="full-field">
+      Title
+      <input name="title" value="${esc(doc.title || '')}">
+    </label>
+    <label class="full-field">
+      Notes
+      <textarea name="notes">${esc(doc.notes || '')}</textarea>
+    </label>
+    <label class="full-field">
+      Amount
+      <input name="amount" type="number" step="0.01" value="${esc(doc.amount ?? '')}">
+    </label>`,
+    async form => {
+      const amount = form.get('amount');
+
+      await api(`/api/documents/${encodeURIComponent(id)}`, {
+        method:'PATCH',
+        body:JSON.stringify({
+          originalName:form.get('originalName'),
+          title:form.get('title'),
+          notes:form.get('notes'),
+          amount
+        })
+      });
+
+      await loadUploads();
+      await loadHome();
+      toast('File details updated.');
+    }
+  );
+}
+
+async function deleteFile(id) {
+  const doc = state.docs.find(d => String(idOf(d)) === String(id));
+
+  const confirmed = confirm(
+    `Delete "${doc?.originalName || 'this file'}"?\n\n` +
+    `This permanently deletes the file record and uploaded file. ` +
+    `This cannot be undone.`
+  );
+
+  if (!confirmed) return;
+
+  try {
+    await api(`/api/documents/${encodeURIComponent(id)}`, {
+      method:'DELETE'
+    });
+
+    await loadUploads();
+    await loadHome();
+    toast('File deleted.');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function downloadFile(id) {
+  try {
+    const response = await fetch(
+      `/api/documents/${encodeURIComponent(id)}/file`,
+      { headers: { Authorization:`Bearer ${state.token}` } }
+    );
+
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Could not download file.');
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download = 'paper-work-file';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function previewFile(id) {
+  try {
+    const response = await fetch(
+      `/api/documents/${encodeURIComponent(id)}/file`,
+      { headers: { Authorization:`Bearer ${state.token}` } }
+    );
+
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Could not open file.');
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+
+    window.open(url, '_blank', 'noopener');
+
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// USER MANAGEMENT
+
+async function loadUsers() {
+  if (!isAdmin()) return;
+
+  try {
+    const users = await api('/api/users');
+
+    state.users = Array.isArray(users) ? users : [];
+
+    const host = $('#userList');
+    if (!host) return;
+
+    host.innerHTML = state.users.map(user => `
+      <div class="upload-row">
+        <div class="file-thumb">👤</div>
+        <div class="file-info">
+          <strong>${esc(user.name)}</strong>
+          <span>${esc(user.email)} · ${esc(user.role)}</span>
+          <span>${esc(user.store?.name || 'No store assigned')} ·
+            ${user.active === false ? 'Inactive' : 'Active'}
+          </span>
+        </div>
+        <button type="button" class="row-action"
+          data-edit-user="${esc(user.id)}">Edit</button>
+        <button type="button" class="row-action danger-action"
+          data-delete-user="${esc(user.id)}">Delete</button>
+      </div>
+    `).join('') || '<div class="empty-state">No users found.</div>';
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function addUser() {
+  const storeOptions = state.stores.map(s =>
+    `<option value="${esc(s.id)}">${esc(s.name)}</option>`
+  ).join('');
+
+  openModal(
+    'Add user',
+    `<label class="full-field">Name
+      <input name="name" required>
+    </label>
+    <label class="full-field">Email
+      <input name="email" type="email" required>
+    </label>
+    <label class="full-field">Password (minimum 10 characters)
+      <input name="password" type="password" minlength="10" required>
+    </label>
+    <label class="full-field">Role
+      <select name="role">
+        <option value="STORE_MANAGER">Store Manager</option>
+        <option value="SUPER_ADMIN">Super Admin</option>
+      </select>
+    </label>
+    <label class="full-field">Store
+      <select name="storeId">
+        <option value="">No store</option>
+        ${storeOptions}
+      </select>
+    </label>`,
+    async form => {
+      await api('/api/users', {
+        method:'POST',
+        body:JSON.stringify({
+          name:form.get('name'),
+          email:form.get('email'),
+          password:form.get('password'),
+          role:form.get('role'),
+          storeId:form.get('storeId') || null
+        })
+      });
+
+      await loadUsers();
+      toast('User created.');
+    }
+  );
+}
+
+async function editUser(id) {
+  const user = state.users.find(u => String(u.id) === String(id));
+
+  if (!user) {
+    toast('User not found.', true);
+    return;
+  }
+
+  const storeOptions = state.stores.map(s =>
+    `<option value="${esc(s.id)}" ${s.id === user.storeId ? 'selected' : ''}>
+      ${esc(s.name)}
+    </option>`
+  ).join('');
+
+  openModal(
+    'Edit user',
+    `<label class="full-field">Name
+      <input name="name" required value="${esc(user.name)}">
+    </label>
+    <label class="full-field">Email
+      <input name="email" type="email" required value="${esc(user.email)}">
+    </label>
+    <label class="full-field">New password (leave blank to keep current)
+      <input name="password" type="password" minlength="10">
+    </label>
+    <label class="full-field">Role
+      <select name="role">
+        <option value="STORE_MANAGER" ${user.role === 'STORE_MANAGER' ? 'selected' : ''}>Store Manager</option>
+        <option value="SUPER_ADMIN" ${user.role === 'SUPER_ADMIN' ? 'selected' : ''}>Super Admin</option>
+      </select>
+    </label>
+    <label class="full-field">Store
+      <select name="storeId">
+        <option value="">No store</option>
+        ${storeOptions}
+      </select>
+    </label>
+    <label class="full-field">
+      <input type="checkbox" name="active" ${user.active !== false ? 'checked' : ''}>
+      Account active
+    </label>`,
+    async form => {
+      const password = form.get('password');
+
+      await api(`/api/users/${encodeURIComponent(id)}`, {
+        method:'PATCH',
+        body:JSON.stringify({
+          name:form.get('name'),
+          email:form.get('email'),
+          ...(password ? {password} : {}),
+          role:form.get('role'),
+          storeId:form.get('storeId') || null,
+          active:form.get('active') === 'on'
+        })
+      });
+
+      await loadUsers();
+      toast('User updated.');
+    }
+  );
+}
+
+async function deleteUser(id) {
+  const user = state.users.find(u => String(u.id) === String(id));
+
+  if (!confirm(
+    `Permanently delete user "${user?.name || id}"?\n\nThis cannot be undone.`
+  )) return;
+
+  try {
+    await api(`/api/users/${encodeURIComponent(id)}`, {
+      method:'DELETE'
+    });
+
+    await loadUsers();
+    toast('User deleted.');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// GOOGLE DRIVE CONNECTION
+
+async function connectDrive() {
+  try {
+    const result = await api('/api/drive/connect');
+
+    if (!result.url) {
+      throw new Error('Google connection URL was not returned.');
+    }
+
+    window.location.href = result.url;
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+// EVENT LISTENERS
+
+function bindEvents() {
+  $('#loginForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+
+    const button = $('#loginButton');
+    if (button?.disabled) return;
+
+    button.disabled = true;
+
+    try {
+      await login(
+        $('#loginEmail').value.trim(),
+        $('#loginPassword').value
+      );
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  $('#logoutButton')?.addEventListener('click', () => logout());
+
+  $('#sidebarToggle')?.addEventListener('click', toggleMobileMenu);
+  $('#sidebarBackdrop')?.addEventListener('click', closeMobileMenu);
+
+  $$('.nav-item,.mobile-nav-item').forEach(el => {
+    el.addEventListener('click', () => nav(el.dataset.page));
+  });
+
+  $('#addStoreButton')?.addEventListener('click', addStore);
+  $('#addUserButton')?.addEventListener('click', addUser);
+  $('#connectDrive')?.addEventListener('click', connectDrive);
+
+  $('#storeSearch')?.addEventListener('input', renderStores);
+
+  $('#monthYear')?.addEventListener('change', () => {
+    if (state.selectedStore) {
+      loadStoreDetail().catch(e => toast(e.message, true));
+    }
+  });
+
+  $('#modalClose')?.addEventListener('click', () => {
+    $('#modalBackdrop').classList.add('hidden');
+  });
+
+  $('#modalCancel')?.addEventListener('click', () => {
+    $('#modalBackdrop').classList.add('hidden');
+  });
+
+  $('#modalBackdrop')?.addEventListener('click', event => {
+    if (event.target.id === 'modalBackdrop') {
+      $('#modalBackdrop').classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('click', event => {
+    const target = event.target.closest('button');
+    if (!target) return;
+
+    if (target.dataset.openStore) {
+      openStore(target.dataset.openStore);
+    }
+
+    if (target.dataset.editStore) {
+      editStore(target.dataset.editStore);
+    }
+
+    if (target.dataset.toggleStore) {
+      toggleStore(
+        target.dataset.toggleStore,
+        target.dataset.active === 'true'
+      );
+    }
+
+    if (target.dataset.deleteStore) {
+      deleteStore(target.dataset.deleteStore);
+    }
+
+    if (target.dataset.month) {
+      openMonth(target.dataset.month);
+    }
+
+    if (target.dataset.editFile) {
+      editFile(target.dataset.editFile);
+    }
+
+    if (target.dataset.deleteFile) {
+      deleteFile(target.dataset.deleteFile);
+    }
+
+    if (target.dataset.download) {
+      downloadFile(target.dataset.download);
+    }
+
+    if (target.dataset.preview) {
+      previewFile(target.dataset.preview);
+    }
+
+    if (target.dataset.editUser) {
+      editUser(target.dataset.editUser);
+    }
+
+    if (target.dataset.deleteUser) {
+      deleteUser(target.dataset.deleteUser);
+    }
+  });
+}
+
+// STARTUP
+
+document.addEventListener('DOMContentLoaded', async () => {
+  bindEvents();
+
+  if (!state.token) {
+    showLogin();
+    return;
+  }
+
+  try {
+    const result = await api('/api/auth/me');
+    await enter(result.user);
+  } catch (e) {
+    logout(false);
+  }
+});
+
+})();
