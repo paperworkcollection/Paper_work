@@ -34,10 +34,7 @@ const upload = multer({
   storage,
   limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (_r, f, cb) =>
-    cb(
-      null,
-      /^(image\/(jpeg|png|webp)|application\/pdf|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/msword|application\/vnd\.ms-excel)$/.test(f.mimetype)
-    )
+    cb(null, /^(image\/(jpeg|png|webp)|application\/pdf|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/msword|application\/vnd\.ms-excel)$/.test(f.mimetype))
 });
 
 const signToken = u =>
@@ -58,7 +55,7 @@ const safeName = s =>
 const dateOnly = d => new Date(`${String(d).slice(0, 10)}T00:00:00.000Z`);
 const dateString = d => new Date(d || Date.now()).toISOString().slice(0, 10);
 const storeScope = (u, id) =>
-  u.role === "SUPER_ADMIN" ? id || undefined : u.storeId || "__none__";
+  u.role === "SUPER_ADMIN" ? (id || undefined) : (u.storeId || "__none__");
 
 app.get("/api/health", (_q, s) =>
   s.json({ status: "ok", service: "Paper Work" })
@@ -71,11 +68,8 @@ app.post("/api/auth/login", async (req, res) => {
     where: { email: String(email || "").toLowerCase().trim() }
   });
 
-  if (
-    !u ||
-    !u.active ||
-    !(await bcrypt.compare(String(password || ""), u.passwordHash))
-  ) {
+  if (!u || !u.active ||
+      !(await bcrypt.compare(String(password || ""), u.passwordHash))) {
     return res.status(401).json({ error: "Invalid login credentials" });
   }
 
@@ -88,11 +82,12 @@ app.use("/api", (req, res, next) =>
 
 app.get("/api/auth/me", (req, res) => res.json({ user: req.user }));
 
+// STORE MANAGEMENT
+
 app.get("/api/stores", async (req, res) => {
-  const where =
-    req.user.role === "SUPER_ADMIN"
-      ? {}
-      : { id: req.user.storeId || "__none__" };
+  const where = req.user.role === "SUPER_ADMIN"
+    ? {}
+    : { id: req.user.storeId || "__none__" };
 
   const stores = await prisma.store.findMany({
     where,
@@ -106,11 +101,26 @@ app.get("/api/stores", async (req, res) => {
 app.post("/api/stores", requireAdmin, async (req, res) => {
   const name = String(req.body?.name || "").trim();
 
-  if (!name) return res.status(400).json({ error: "Store name is required" });
+  if (!name) {
+    return res.status(400).json({ error: "Store name is required" });
+  }
+
+  // Prevent duplicate store names.
+  const duplicate = await prisma.store.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } }
+  });
+
+  if (duplicate) {
+    return res.status(409).json({
+      error: `A store named "${duplicate.name}" already exists.`
+    });
+  }
 
   const code = `PW-${crypto.randomBytes(5).toString("hex").toUpperCase()}`;
 
-  const store = await prisma.store.create({ data: { name, code } });
+  const store = await prisma.store.create({
+    data: { name, code }
+  });
 
   await audit({
     actorId: req.user.id,
@@ -128,12 +138,38 @@ app.patch("/api/stores/:id", requireAdmin, async (req, res) => {
     where: { id: req.params.id }
   });
 
-  if (!before) return res.status(404).json({ error: "Store not found" });
+  if (!before) {
+    return res.status(404).json({ error: "Store not found" });
+  }
 
   const data = {};
 
-  if (req.body.name !== undefined) data.name = String(req.body.name).trim();
-  if (req.body.active !== undefined) data.active = !!req.body.active;
+  if (req.body.name !== undefined) {
+    const name = String(req.body.name).trim();
+
+    if (!name) {
+      return res.status(400).json({ error: "Store name is required" });
+    }
+
+    const duplicate = await prisma.store.findFirst({
+      where: {
+        id: { not: before.id },
+        name: { equals: name, mode: "insensitive" }
+      }
+    });
+
+    if (duplicate) {
+      return res.status(409).json({
+        error: `A store named "${duplicate.name}" already exists.`
+      });
+    }
+
+    data.name = name;
+  }
+
+  if (req.body.active !== undefined) {
+    data.active = !!req.body.active;
+  }
 
   const store = await prisma.store.update({
     where: { id: before.id },
@@ -151,6 +187,62 @@ app.patch("/api/stores/:id", requireAdmin, async (req, res) => {
 
   res.json(store);
 });
+
+app.delete("/api/stores/:id", requireAdmin, async (req, res) => {
+  const store = await prisma.store.findUnique({
+    where: { id: req.params.id }
+  });
+
+  if (!store) {
+    return res.status(404).json({ error: "Store not found" });
+  }
+
+  const docs = await prisma.documentRecord.findMany({
+    where: { storeId: store.id },
+    select: { id: true, storedName: true }
+  });
+
+  for (const d of docs) {
+    await prisma.auditLog.deleteMany({ where: { documentId: d.id } });
+    await prisma.approvalLog.deleteMany({ where: { documentId: d.id } });
+  }
+
+  await prisma.documentRecord.deleteMany({
+    where: { storeId: store.id }
+  });
+
+  await prisma.monthlySlipEntry.deleteMany({
+    where: { storeId: store.id }
+  });
+
+  await prisma.user.updateMany({
+    where: { storeId: store.id },
+    data: { storeId: null, active: false }
+  });
+
+  await prisma.store.delete({
+    where: { id: store.id }
+  });
+
+  for (const d of docs) {
+    if (d.storedName) {
+      const f = path.join(uploadDir, path.basename(d.storedName));
+      if (fs.existsSync(f)) fs.unlink(f, () => {});
+    }
+  }
+
+  await audit({
+    actorId: req.user.id,
+    action: "DELETE",
+    entityType: "Store",
+    entityId: store.id,
+    before: { ...store, deletedDocumentCount: docs.length }
+  });
+
+  res.json({ ok: true, deletedDocuments: docs.length });
+});
+
+// USER MANAGEMENT
 
 app.get("/api/users", requireAdmin, async (_q, res) => {
   const users = await prisma.user.findMany({
@@ -172,7 +264,9 @@ app.post("/api/users", requireAdmin, async (req, res) => {
   }
 
   if (role === "STORE_MANAGER" && !storeId) {
-    return res.status(400).json({ error: "Select the store for this login" });
+    return res.status(400).json({
+      error: "Select the store for this login"
+    });
   }
 
   const user = await prisma.user.create({
@@ -196,43 +290,143 @@ app.post("/api/users", requireAdmin, async (req, res) => {
   res.status(201).json(cleanUser(user));
 });
 
+app.patch("/api/users/:id", requireAdmin, async (req, res) => {
+  const before = await prisma.user.findUnique({
+    where: { id: req.params.id }
+  });
+
+  if (!before) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  const data = {};
+
+  if (req.body.name !== undefined) data.name = String(req.body.name).trim();
+  if (req.body.email !== undefined) {
+    data.email = String(req.body.email).toLowerCase().trim();
+  }
+
+  if (req.body.role !== undefined) {
+    if (!["SUPER_ADMIN", "STORE_MANAGER"].includes(req.body.role)) {
+      return res.status(400).json({ error: "Invalid user role" });
+    }
+    data.role = req.body.role;
+  }
+
+  if (req.body.active !== undefined) data.active = !!req.body.active;
+  if (req.body.storeId !== undefined) data.storeId = req.body.storeId || null;
+
+  if (req.body.password !== undefined) {
+    if (String(req.body.password).length < 10) {
+      return res.status(400).json({
+        error: "Password must be at least 10 characters"
+      });
+    }
+    data.passwordHash = await bcrypt.hash(String(req.body.password), 12);
+  }
+
+  const user = await prisma.user.update({
+    where: { id: before.id },
+    data
+  });
+
+  await audit({
+    actorId: req.user.id,
+    action: "UPDATE",
+    entityType: "User",
+    entityId: user.id,
+    before: cleanUser(before),
+    after: cleanUser(user)
+  });
+
+  res.json(cleanUser(user));
+});
+
+app.delete("/api/users/:id", requireAdmin, async (req, res) => {
+  if (req.params.id === req.user.id) {
+    return res.status(400).json({
+      error: "You cannot delete your own admin account"
+    });
+  }
+
+  const before = await prisma.user.findUnique({
+    where: { id: req.params.id }
+  });
+
+  if (!before) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  await prisma.auditLog.updateMany({
+    where: { actorId: before.id },
+    data: { actorId: req.user.id }
+  });
+
+  await prisma.approvalLog.updateMany({
+    where: { actorId: before.id },
+    data: { actorId: req.user.id }
+  });
+
+  await prisma.documentRecord.updateMany({
+    where: { uploadedById: before.id },
+    data: { uploadedById: req.user.id }
+  });
+
+  await prisma.documentRecord.updateMany({
+    where: { reviewedById: before.id },
+    data: { reviewedById: null }
+  });
+
+  await prisma.user.delete({
+    where: { id: before.id }
+  });
+
+  await audit({
+    actorId: req.user.id,
+    action: "DELETE",
+    entityType: "User",
+    entityId: before.id,
+    before: cleanUser(before)
+  });
+
+  res.json({ ok: true });
+});
+
+// DOCUMENT MANAGEMENT
+
 app.get("/api/documents", async (req, res) => {
   const { storeId, from, to, date, month, year, q, kind } = req.query;
   const effective = storeScope(req.user, storeId);
 
   const where = {
     ...(effective ? { storeId: effective } : {}),
-    ...(date
-      ? {
-          documentDate: {
-            gte: dateOnly(date),
-            lt: new Date(dateOnly(date).getTime() + 86400000)
-          }
-        }
-      : {}),
-    ...(from || to
-      ? {
-          documentDate: {
-            ...(from ? { gte: dateOnly(from) } : {}),
-            ...(to
-              ? { lt: new Date(dateOnly(to).getTime() + 86400000) }
-              : {})
-          }
-        }
-      : {}),
-    ...(q
-      ? {
-          OR: [
-            { title: { contains: String(q), mode: "insensitive" } },
-            { originalName: { contains: String(q), mode: "insensitive" } },
-            {
-              store: {
-                is: { name: { contains: String(q), mode: "insensitive" } }
-              }
+    ...(date ? {
+      documentDate: {
+        gte: dateOnly(date),
+        lt: new Date(dateOnly(date).getTime() + 86400000)
+      }
+    } : {}),
+    ...(from || to ? {
+      documentDate: {
+        ...(from ? { gte: dateOnly(from) } : {}),
+        ...(to ? {
+          lt: new Date(dateOnly(to).getTime() + 86400000)
+        } : {})
+      }
+    } : {}),
+    ...(q ? {
+      OR: [
+        { title: { contains: String(q), mode: "insensitive" } },
+        { originalName: { contains: String(q), mode: "insensitive" } },
+        {
+          store: {
+            is: {
+              name: { contains: String(q), mode: "insensitive" }
             }
-          ]
+          }
         }
-      : {})
+      ]
+    } : {})
   };
 
   let docs = await prisma.documentRecord.findMany({
@@ -253,7 +447,8 @@ app.get("/api/documents", async (req, res) => {
       (!kind ||
         (kind === "DAILY_SHIFT_REPORT"
           ? d.category === "DAILY_REPORT"
-          : d.category === "OTHER" && d.title.startsWith("Other File")))
+          : d.category === "OTHER" && d.title.startsWith("Other File"))
+      )
     );
   });
 
@@ -282,13 +477,19 @@ app.post("/api/documents", upload.single("file"), async (req, res) => {
       });
     }
 
-    if (req.user.role !== "SUPER_ADMIN" && body.storeId && body.storeId !== req.user.storeId) {
+    if (
+      req.user.role !== "SUPER_ADMIN" &&
+      body.storeId &&
+      body.storeId !== req.user.storeId
+    ) {
       return res.status(403).json({
         error: "You can upload only to your assigned store"
       });
     }
 
-    const store = await prisma.store.findUnique({ where: { id: storeId } });
+    const store = await prisma.store.findUnique({
+      where: { id: storeId }
+    });
 
     if (!store || !store.active) {
       return res.status(404).json({ error: "Active store not found" });
@@ -361,6 +562,67 @@ app.post("/api/documents", upload.single("file"), async (req, res) => {
   }
 });
 
+app.patch("/api/documents/:id", requireAdmin, async (req, res) => {
+  const before = await prisma.documentRecord.findUnique({
+    where: { id: req.params.id }
+  });
+
+  if (!before) {
+    return res.status(404).json({ error: "File record not found" });
+  }
+
+  const allowed = [
+    "title",
+    "originalName",
+    "notes",
+    "referenceNumber",
+    "financialYear",
+    "currency",
+    "status"
+  ];
+
+  const data = {};
+
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      data[key] = String(req.body[key]).slice(0, key === "notes" ? 4000 : 255);
+    }
+  }
+
+  if (req.body.amount !== undefined) {
+    const n = req.body.amount === "" ? null : Number(req.body.amount);
+
+    if (n !== null && !Number.isFinite(n)) {
+      return res.status(400).json({ error: "Amount must be a valid number" });
+    }
+
+    data.amount = n;
+  }
+
+  if (req.body.documentDate !== undefined) {
+    data.documentDate = req.body.documentDate
+      ? dateOnly(req.body.documentDate)
+      : null;
+  }
+
+  const doc = await prisma.documentRecord.update({
+    where: { id: before.id },
+    data
+  });
+
+  await audit({
+    actorId: req.user.id,
+    action: "UPDATE",
+    entityType: "DocumentRecord",
+    entityId: doc.id,
+    documentId: doc.id,
+    before,
+    after: doc
+  });
+
+  res.json(doc);
+});
+
 app.get("/api/documents/:id/file", async (req, res) => {
   const d = await prisma.documentRecord.findUnique({
     where: { id: req.params.id }
@@ -390,9 +652,13 @@ app.delete("/api/documents/:id", requireAdmin, async (req, res) => {
     where: { id: req.params.id }
   });
 
-  if (!d) return res.status(404).json({ error: "File not found" });
+  if (!d) {
+    return res.status(404).json({ error: "File not found" });
+  }
 
-  await prisma.documentRecord.delete({ where: { id: d.id } });
+  await prisma.documentRecord.delete({
+    where: { id: d.id }
+  });
 
   if (d.storedName) {
     const p = path.join(uploadDir, path.basename(d.storedName));
@@ -410,7 +676,8 @@ app.delete("/api/documents/:id", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Google Drive OAuth
+// GOOGLE DRIVE INTEGRATION
+
 async function driveToken() {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
     throw new Error(
@@ -442,7 +709,9 @@ async function driveToken() {
 
   const j = await r.json();
 
-  if (!r.ok) throw new Error(j.error_description || "Google token refresh failed");
+  if (!r.ok) {
+    throw new Error(j.error_description || "Google token refresh failed");
+  }
 
   return j.access_token;
 }
@@ -530,7 +799,9 @@ app.get("/api/drive/callback", async (req, res) => {
       after: { refreshToken: j.refresh_token, email: info.email }
     });
 
-    res.send("<h2>Google Drive connected.</h2><p>You can close this tab and return to Paper Work.</p>");
+    res.send(
+      "<h2>Google Drive connected.</h2><p>You can close this tab and return to Paper Work.</p>"
+    );
   } catch (e) {
     res.status(400).send(
       `<h2>Google Drive connection failed</h2><p>${String(e.message).replace(/[<>]/g, "")}</p>`
@@ -538,7 +809,8 @@ app.get("/api/drive/callback", async (req, res) => {
   }
 });
 
-// Always create a new Excel file. Never update an existing one.
+// MONTHLY EXCEL WORKBOOK HELPERS
+
 async function createDriveExcelFile(filename, buffer) {
   const token = await driveToken();
   const boundary = `pw_${crypto.randomBytes(8).toString("hex")}`;
@@ -670,8 +942,12 @@ async function buildMonthlyWorkbook(store, year, month) {
   });
 
   const entryKey = (date, name) => `${date}|${name || ""}`;
+
   const byKey = new Map(
-    entries.map(e => [entryKey(e.reportDate || "", e.fileName || ""), e])
+    entries.map(e => [
+      entryKey(e.reportDate || "", e.fileName || ""),
+      e
+    ])
   );
 
   const docsByDate = new Map();
@@ -774,20 +1050,15 @@ async function buildMonthlyWorkbook(store, year, month) {
   };
 }
 
-// Google Sheets monthly workbook route
+// MONTHLY GOOGLE SHEET ROUTE
+
 app.get("/api/stores/:id/monthly-sheet", requireAdmin, async (req, res) => {
   try {
     const y = Number(req.query.year);
     const m = Number(req.query.month);
 
-    if (
-      !Number.isInteger(y) ||
-      y < 2000 ||
-      y > 2100 ||
-      !Number.isInteger(m) ||
-      m < 1 ||
-      m > 12
-    ) {
+    if (!Number.isInteger(y) || y < 2000 || y > 2100 ||
+        !Number.isInteger(m) || m < 1 || m > 12) {
       return res.status(400).json({ error: "Choose a valid month and year" });
     }
 
@@ -820,8 +1091,7 @@ app.get("/api/stores/:id/monthly-sheet", requireAdmin, async (req, res) => {
         saved = null;
       } else {
         return res.json({
-          url:
-            check.webViewLink ||
+          url: check.webViewLink ||
             `https://docs.google.com/spreadsheets/d/${check.id}/edit`,
           spreadsheetId: check.id,
           existing: true
@@ -922,8 +1192,7 @@ app.get("/api/stores/:id/monthly-sheet", requireAdmin, async (req, res) => {
     });
 
     res.json({
-      url:
-        file.webViewLink ||
+      url: file.webViewLink ||
         `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
       spreadsheetId: file.id,
       existing: false
@@ -934,6 +1203,8 @@ app.get("/api/stores/:id/monthly-sheet", requireAdmin, async (req, res) => {
     });
   }
 });
+
+// MONTHLY WORKBOOK DATA
 
 app.get("/api/stores/:id/monthly-workbook", requireAdmin, async (req, res) => {
   try {
@@ -959,7 +1230,9 @@ app.get("/api/stores/:id/monthly-workbook", requireAdmin, async (req, res) => {
       rows
     });
   } catch (e) {
-    res.status(400).json({ error: e.message || "Could not load workbook" });
+    res.status(400).json({
+      error: e.message || "Could not load workbook"
+    });
   }
 });
 
@@ -997,8 +1270,9 @@ app.put("/api/stores/:id/monthly-workbook", requireAdmin, async (req, res) => {
         reportDate,
         fileName,
         slipDetails: String(row.slipDetails || "").slice(0, 4000),
-        amount:
-          row.amount === "" || row.amount == null ? null : Number(row.amount),
+        amount: row.amount === "" || row.amount == null
+          ? null
+          : Number(row.amount),
         currency: String(row.currency || "USD").slice(0, 8),
         notes: String(row.notes || "").slice(0, 4000),
         enteredBy: String(row.enteredBy || "").slice(0, 150)
@@ -1049,8 +1323,7 @@ app.put("/api/stores/:id/monthly-workbook", requireAdmin, async (req, res) => {
     res.json({
       saved: true,
       driveSynced: false,
-      message:
-        "Entries were saved to the database. The existing Google Drive Excel file was not regenerated or overwritten.",
+      message: "Entries were saved to the database. The existing Google Drive Excel file was not regenerated or overwritten.",
       entries: savedRows
     });
   } catch (e) {
@@ -1060,20 +1333,15 @@ app.put("/api/stores/:id/monthly-workbook", requireAdmin, async (req, res) => {
   }
 });
 
-// MONTHLY EXCEL ROUTE — open existing workbook, create only on first opening.
+// MONTHLY EXCEL FILE: CREATE ONCE, REUSE THEREAFTER
+
 app.get("/api/stores/:id/monthly.xlsx", requireAdmin, async (req, res) => {
   try {
     const y = Number(req.query.year);
     const m = Number(req.query.month);
 
-    if (
-      !Number.isInteger(y) ||
-      y < 2000 ||
-      y > 2100 ||
-      !Number.isInteger(m) ||
-      m < 1 ||
-      m > 12
-    ) {
+    if (!Number.isInteger(y) || y < 2000 || y > 2100 ||
+        !Number.isInteger(m) || m < 1 || m > 12) {
       return res.status(400).json({ error: "Choose a valid month and year" });
     }
 
@@ -1099,7 +1367,7 @@ app.get("/api/stores/:id/monthly.xlsx", requireAdmin, async (req, res) => {
         orderBy: { createdAt: "desc" }
       });
 
-      // If already registered, never recreate it.
+      // Once registered, never recreate the workbook.
       if (saved?.after?.fileId) {
         const existing = await driveGetFile(saved.after.fileId, token);
 
@@ -1114,7 +1382,7 @@ app.get("/api/stores/:id/monthly.xlsx", requireAdmin, async (req, res) => {
         return { file: existing, existing: true };
       }
 
-      // Adopt an existing matching Excel file instead of replacing it.
+      // Adopt one existing matching workbook instead of replacing it.
       const matches = await findDriveExcelFiles(filename, token);
 
       if (matches.length > 1) {
@@ -1145,7 +1413,7 @@ app.get("/api/stores/:id/monthly.xlsx", requireAdmin, async (req, res) => {
         return { file, existing: true, adopted: true };
       }
 
-      // First opening only: generate and create the workbook once.
+      // First opening only: generate and create the workbook.
       const { buffer, rows } = await buildMonthlyWorkbook(store, y, m);
       const file = await createDriveExcelFile(filename, buffer);
 
@@ -1174,8 +1442,8 @@ app.get("/api/stores/:id/monthly.xlsx", requireAdmin, async (req, res) => {
       existing: result.existing,
       adopted: !!result.adopted,
       name: filename,
-      webViewLink:
-        file.webViewLink || `https://drive.google.com/file/d/${file.id}/view`,
+      webViewLink: file.webViewLink ||
+        `https://drive.google.com/file/d/${file.id}/view`,
       fileId: file.id,
       entries: result.entries ?? null
     });
