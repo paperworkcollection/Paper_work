@@ -126,6 +126,7 @@ function fileRow(doc) {
     <span>${esc(doc.store?.name || 'Your store')} · ${fmt(doc.documentDate || doc.createdAt)}</span></div>
     <button type="button" class="row-action" data-preview="${esc(fileId)}">View</button>
     <button type="button" class="row-action" data-download="${esc(fileId)}">↓</button>
+    ${isAdmin() ? `<button type="button" class="row-action" data-edit-file="${esc(fileId)}">Edit</button><button type="button" class="row-action danger-action" data-delete-file="${esc(fileId)}">Delete</button>` : ''}
   </div>`;
 }
 
@@ -142,6 +143,7 @@ async function loadHome() {
         ? `Connected${drive.email ? ` as ${drive.email}` : ''}`
         : 'Not connected — connect the Google account for monthly workbooks.';
       $('#connectDrive').textContent = drive.connected ? 'Reconnect Google Drive' : 'Connect Google Drive';
+      await loadUsers();
     }
   } catch (e) { toast(e.message, true); }
 }
@@ -161,12 +163,12 @@ function renderStores() {
   const matches = state.stores.filter(s => String(s.name || '').toLowerCase().includes(query));
   host.innerHTML = matches.length ? matches.map(store => {
     const storeId = idOf(store);
-    return `<button type="button" class="store-card" data-open-store="${esc(storeId)}">
+    return `<div class="store-card-wrap"><button type="button" class="store-card" data-open-store="${esc(storeId)}">
       <span class="store-card-icon">▣</span>
       <span class="store-card-text"><strong>${esc(store.name || 'Unnamed store')}</strong>
-      <small>${Number(store._count?.documents || 0)} uploaded files</small></span>
+      <small>${Number(store._count?.documents || 0)} uploaded files · ${store.active === false ? 'Inactive' : 'Active'}</small></span>
       <span class="store-card-arrow">→</span>
-    </button>`;
+    </button><div class="admin-card-actions"><button type="button" class="row-action" data-edit-store="${esc(storeId)}">Edit</button><button type="button" class="row-action" data-toggle-store="${esc(storeId)}" data-active="${store.active !== false}">${store.active === false ? 'Activate' : 'Deactivate'}</button><button type="button" class="row-action danger-action" data-delete-store="${esc(storeId)}">Delete</button></div></div>`;
   }).join('') : '<div class="empty-state">No stores found.</div>';
 }
 async function openStore(id) {
@@ -225,12 +227,15 @@ async function openMonth(month) {
 
 // Modal helpers
 function openModal(title, fields, submit) {
+  let submitting = false;
   $('#modalTitle').textContent = title;
   $('#modalFields').innerHTML = fields;
   $('#modalError').textContent = '';
   $('#modalBackdrop').classList.remove('hidden');
   $('#modalForm').onsubmit = async event => {
     event.preventDefault();
+    if (submitting) return;
+    submitting = true;
     const button = $('#modalSubmit');
     button.disabled = true;
     try {
@@ -238,7 +243,7 @@ function openModal(title, fields, submit) {
       $('#modalBackdrop').classList.add('hidden');
     } catch (e) {
       $('#modalError').textContent = e.message;
-    } finally { button.disabled = false; }
+    } finally { submitting = false; button.disabled = false; }
   };
 }
 function addStore() {
@@ -250,6 +255,68 @@ function addStore() {
       toast('Store added.');
     });
 }
+async function loadUsers() {
+  if (!isAdmin() || !$('#adminUsers')) return;
+  try {
+    const users = await api('/api/users');
+    $('#adminUsers').innerHTML = users.map(user => `<div class="upload-row"><div class="file-thumb">${esc((user.name||'U').slice(0,1).toUpperCase())}</div><div class="file-info"><strong>${esc(user.name)}</strong><span>${esc(user.email)} · ${esc(user.role)} · ${user.active ? 'Active' : 'Inactive'}${user.store?.name ? ` · ${esc(user.store.name)}` : ''}</span></div><button type="button" class="row-action" data-edit-user="${esc(user.id)}">Edit</button><button type="button" class="row-action" data-toggle-user="${esc(user.id)}" data-active="${user.active}">${user.active ? 'Deactivate' : 'Activate'}</button><button type="button" class="row-action danger-action" data-delete-user="${esc(user.id)}">Delete</button></div>`).join('') || '<div class="empty-state">No users found.</div>';
+  } catch(e) { $('#adminUsers').innerHTML = `<div class="empty-state">${esc(e.message)}</div>`; }
+}
+async function editUser(id) {
+  const users=await api('/api/users'); const user=users.find(u=>String(u.id)===String(id)); if(!user)return toast('User not found.',true);
+  const options=state.stores.map(s=>`<option value="${esc(idOf(s))}" ${user.storeId===idOf(s)?'selected':''}>${esc(s.name)}</option>`).join('');
+  openModal('Edit user',`<label class="full-field">Name<input name="name" required value="${esc(user.name)}"></label><label class="full-field">Email<input name="email" type="email" required value="${esc(user.email)}"></label><label class="full-field">Role<select name="role"><option value="STORE_MANAGER" ${user.role==='STORE_MANAGER'?'selected':''}>Store manager</option><option value="SUPER_ADMIN" ${user.role==='SUPER_ADMIN'?'selected':''}>Super admin</option></select></label><label class="full-field">Assigned store<select name="storeId"><option value="">No store</option>${options}</select></label><label class="full-field">New password (optional, 10+ characters)<input name="password" type="password" minlength="10"></label>`,async form=>{const body=Object.fromEntries(form.entries());if(!body.password)delete body.password;await api(`/api/users/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(body)});await loadUsers();toast('User updated.');});
+}
+async function toggleUser(id, active) {
+  const users=await api('/api/users');const user=users.find(u=>String(u.id)===String(id));if(!user)return;
+  const action=active?'deactivate':'activate';if(!confirm(`${action} ${user.name}'s account?`))return;
+  try{await api(`/api/users/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify({active:!active})});await loadUsers();toast(`User ${action}d.`);}catch(e){toast(e.message,true);}
+}
+async function deleteUser(id) {
+  const users=await api('/api/users');const user=users.find(u=>String(u.id)===String(id));if(!user)return;
+  if(!confirm(`Permanently delete user ${user.name} (${user.email})? This cannot be undone.`))return;
+  try{await api(`/api/users/${encodeURIComponent(id)}`,{method:'DELETE'});await loadUsers();toast('User deleted.');}catch(e){toast(e.message,true);}
+}
+
+async function editStore(id) {
+  const store = state.stores.find(s => String(idOf(s)) === String(id));
+  if (!store) return toast('Store not found. Refresh and try again.', true);
+  openModal('Edit store', `<label class="full-field">Store name<input name="name" required value="${esc(store.name)}"></label>`, async form => {
+    await api(`/api/stores/${encodeURIComponent(id)}`, {method:'PATCH', body:JSON.stringify({name:form.get('name')})});
+    await loadStores(); toast('Store updated.');
+  });
+}
+async function toggleStore(id, active) {
+  const store = state.stores.find(s => String(idOf(s)) === String(id));
+  if (!store) return;
+  const action = active ? 'deactivate' : 'activate';
+  if (!confirm(`${action.toUpperCase()} "${store.name}"? ${active ? 'Managers will no longer be able to use this store.' : 'This store will become active again.'}`)) return;
+  try { await api(`/api/stores/${encodeURIComponent(id)}`, {method:'PATCH',body:JSON.stringify({active:!active})}); await loadStores(); toast(`Store ${action}d.`); }
+  catch(e) { toast(e.message,true); }
+}
+async function deleteStore(id) {
+  const store = state.stores.find(s => String(idOf(s)) === String(id));
+  if (!store) return;
+  if (!confirm(`PERMANENTLY DELETE "${store.name}"? This also deletes its uploaded file records and stored files, monthly slip entries, and deactivates its manager accounts. This cannot be undone. Continue?`)) return;
+  if (!confirm(`Final confirmation: permanently delete ${store.name}?`)) return;
+  try { const result=await api(`/api/stores/${encodeURIComponent(id)}`,{method:'DELETE'}); await loadStores(); toast(`Store deleted. ${result.deletedDocuments || 0} file records removed.`); }
+  catch(e) { toast(e.message,true); }
+}
+async function editFile(id) {
+  const docs = await api('/api/documents');
+  const doc = docs.find(d => String(idOf(d)) === String(id));
+  if (!doc) return toast('File not found.', true);
+  openModal('Edit uploaded file', `<label class="full-field">Title<input name="title" value="${esc(doc.title || '')}" required></label><label class="full-field">File name<input name="originalName" value="${esc(doc.originalName || '')}"></label><label class="full-field">Reference number<input name="referenceNumber" value="${esc(doc.referenceNumber || '')}"></label><label class="full-field">Financial year<input name="financialYear" value="${esc(doc.financialYear || '')}"></label><label class="full-field">Amount<input name="amount" type="number" step="0.01" value="${esc(doc.amount ?? '')}"></label><label class="full-field">Currency<input name="currency" value="${esc(doc.currency || 'INR')}"></label><label class="full-field">Notes<textarea name="notes">${esc(doc.notes || '')}</textarea></label><label class="full-field">Status<select name="status">${['DRAFT','SUBMITTED','APPROVED','REJECTED','CORRECTION_REQUESTED','ARCHIVED'].map(x=>`<option ${doc.status===x?'selected':''}>${x}</option>`).join('')}</select></label>`, async form => {
+    const body=Object.fromEntries(form.entries()); await api(`/api/documents/${encodeURIComponent(id)}`,{method:'PATCH',body:JSON.stringify(body)}); await loadUploads(); if(state.selectedStore) await loadStoreDetail(); toast('File details updated.');
+  });
+}
+async function deleteFile(id) {
+  const docs=await api('/api/documents'); const doc=docs.find(d=>String(idOf(d))===String(id));
+  if(!doc)return toast('File not found.',true);
+  if(!confirm(`Permanently delete "${doc.originalName || doc.title}"? The uploaded file and its record will be removed. This cannot be undone.`))return;
+  try{await api(`/api/documents/${encodeURIComponent(id)}`,{method:'DELETE'});await loadUploads();await loadHome();if(state.selectedStore)await loadStoreDetail();toast('File deleted.');}catch(e){toast(e.message,true);}
+}
+
 function createManager() {
   if (!state.stores.length) { toast('Add a store before creating a manager login.', true); return; }
   const options = state.stores.map(s => `<option value="${esc(idOf(s))}">${esc(s.name)}</option>`).join('');
@@ -371,6 +438,22 @@ attachUploadForm($('#dailyUploadForm'),'DAILY_SHIFT_REPORT','dailyError');
 attachUploadForm($('#otherUploadForm'),'OTHER_FILE','otherError');
 
 document.addEventListener('click', event => {
+  const deleteUserButton = event.target.closest('[data-delete-user]');
+  if (deleteUserButton) { deleteUser(deleteUserButton.dataset.deleteUser); return; }
+  const editUserButton = event.target.closest('[data-edit-user]');
+  if (editUserButton) { editUser(editUserButton.dataset.editUser); return; }
+  const toggleUserButton = event.target.closest('[data-toggle-user]');
+  if (toggleUserButton) { toggleUser(toggleUserButton.dataset.toggleUser, toggleUserButton.dataset.active === 'true'); return; }
+  const deleteStoreButton = event.target.closest('[data-delete-store]');
+  if (deleteStoreButton) { deleteStore(deleteStoreButton.dataset.deleteStore); return; }
+  const editStoreButton = event.target.closest('[data-edit-store]');
+  if (editStoreButton) { editStore(editStoreButton.dataset.editStore); return; }
+  const toggleStoreButton = event.target.closest('[data-toggle-store]');
+  if (toggleStoreButton) { toggleStore(toggleStoreButton.dataset.toggleStore, toggleStoreButton.dataset.active === 'true'); return; }
+  const deleteFileButton = event.target.closest('[data-delete-file]');
+  if (deleteFileButton) { deleteFile(deleteFileButton.dataset.deleteFile); return; }
+  const editFileButton = event.target.closest('[data-edit-file]');
+  if (editFileButton) { editFile(editFileButton.dataset.editFile); return; }
   const storeButton = event.target.closest('[data-open-store]');
   if (storeButton) { openStore(storeButton.dataset.openStore); return; }
   const monthButton = event.target.closest('[data-month]');
