@@ -88,7 +88,7 @@ app.delete("/api/users/:id",requireAdmin,async(req,res)=>{
  res.json({ok:true});
 });
 app.get("/api/documents",async(req,res)=>{const {storeId,from,to,date,month,year,q,kind}=req.query;const effective=storeScope(req.user,storeId);const where={...(effective?{storeId:effective}:{}),...(date?{documentDate:{gte:dateOnly(date),lt:new Date(dateOnly(date).getTime()+86400000)}}:{}),...(from||to?{documentDate:{...(from?{gte:dateOnly(from)}:{}),...(to?{lt:new Date(dateOnly(to).getTime()+86400000)}:{})}}:{}),...(q?{OR:[{title:{contains:String(q),mode:"insensitive"}},{originalName:{contains:String(q),mode:"insensitive"}},{store:{is:{name:{contains:String(q),mode:"insensitive"}}}}]}:{})};let docs=await prisma.documentRecord.findMany({where,include:{store:true,uploadedBy:{select:{id:true,name:true,email:true}}},orderBy:{createdAt:"desc"}});docs=docs.filter(d=>{const dt=d.documentDate||d.createdAt;return(!month||dt.getUTCMonth()+1===Number(month))&&(!year||dt.getUTCFullYear()===Number(year))&&(!kind||(kind==="DAILY_SHIFT_REPORT"?d.category==="DAILY_REPORT":d.category==="OTHER"&&d.title.startsWith("Other File")));});res.json(docs);});
-app.post("/api/documents",uploadOne,async(req,res)=>{let driveFileId=null;try{if(!req.file)return res.status(400).json({error:"Choose a file to upload"});const body=req.body||{},kind=body.kind||"DAILY_SHIFT_REPORT";if(!["DAILY_SHIFT_REPORT","OTHER_FILE"].includes(kind))return res.status(400).json({error:"Invalid upload type"});const storeId=req.user.role==="SUPER_ADMIN"?body.storeId:req.user.storeId;if(!storeId)return res.status(400).json({error:"No store is assigned to this account"});if(req.user.role!=="SUPER_ADMIN"&&body.storeId&&body.storeId!==req.user.storeId)return res.status(403).json({error:"You can upload only to your assigned store"});const store=await prisma.store.findUnique({where:{id:storeId}});if(!store||!store.active)return res.status(404).json({error:"Active store not found"});const day=String(body.documentDate||dateString()).slice(0,10),docDate=dateOnly(day);if(kind==="DAILY_SHIFT_REPORT"){const exists=await prisma.documentRecord.findFirst({where:{storeId,category:"DAILY_REPORT",documentDate:docDate}});if(exists)return res.status(409).json({error:"Today's Daily Shift Report has already been uploaded for this store."});}const ext=path.extname(req.file.originalname).toLowerCase()||".jpg";let displayName=`${safeName(store.name)}_${day}${kind==="OTHER_FILE"?`_Other_${Date.now().toString().slice(-5)}`:""}${ext}`;const same=await prisma.documentRecord.findFirst({where:{storeId,originalName:displayName}});if(same)displayName=displayName.replace(ext,`_${crypto.randomBytes(2).toString("hex")}${ext}`);const driveFile=await uploadDriveFile(displayName,req.file.mimetype,req.file.buffer);driveFileId=driveFile.id;if(!driveFileId)throw new Error("Google Drive did not return a file ID");const doc=await prisma.documentRecord.create({data:{storeId,category:kind==="DAILY_SHIFT_REPORT"?"DAILY_REPORT":"OTHER",title:kind==="DAILY_SHIFT_REPORT"?"Daily Shift Report":"Other File",documentDate:docDate,uploadedById:req.user.id,originalName:displayName,storedName:`gdrive:${driveFileId}`,mimeType:req.file.mimetype,fileSize:req.file.size,status:"SUBMITTED"}});driveFileId=null;try{await audit({actorId:req.user.id,action:"UPLOAD",entityType:"DocumentRecord",entityId:doc.id,documentId:doc.id,after:doc});}catch(auditErr){console.error(`Upload audit log failed for document ${doc.id}: ${auditErr.message}`);}res.status(201).json(doc);}catch(e){if(driveFileId)await deleteDriveFile(driveFileId);res.status(e.status||400).json({error:e.message||"Upload failed"});}});
+app.post("/api/documents",uploadOne,async(req,res)=>{let driveFileId=null;try{if(!req.file)return res.status(400).json({error:"Choose a file to upload"});const body=req.body||{},kind=body.kind||"DAILY_SHIFT_REPORT";if(!["DAILY_SHIFT_REPORT","OTHER_FILE"].includes(kind))return res.status(400).json({error:"Invalid upload type"});const storeId=req.user.role==="SUPER_ADMIN"?body.storeId:req.user.storeId;if(!storeId)return res.status(400).json({error:"No store is assigned to this account"});if(req.user.role!=="SUPER_ADMIN"&&body.storeId&&body.storeId!==req.user.storeId)return res.status(403).json({error:"You can upload only to your assigned store"});const store=await prisma.store.findUnique({where:{id:storeId}});if(!store||!store.active)return res.status(404).json({error:"Active store not found"});const day=String(body.documentDate||dateString()).slice(0,10),docDate=dateOnly(day);if(kind==="DAILY_SHIFT_REPORT"){const exists=await prisma.documentRecord.findFirst({where:{storeId,category:"DAILY_REPORT",documentDate:docDate}});if(exists)return res.status(409).json({error:"Today's Daily Shift Report has already been uploaded for this store."});}const ext=path.extname(req.file.originalname).toLowerCase()||".jpg";let displayName=`${safeName(store.name)}_${day}${kind==="OTHER_FILE"?`_Other_${Date.now().toString().slice(-5)}`:""}${ext}`;const same=await prisma.documentRecord.findFirst({where:{storeId,originalName:displayName}});if(same)displayName=displayName.replace(ext,`_${crypto.randomBytes(2).toString("hex")}${ext}`);const driveFile=await uploadDriveFile(displayName,req.file.mimetype,req.file.buffer,store,docDate);driveFileId=driveFile.id;if(!driveFileId)throw new Error("Google Drive did not return a file ID");const doc=await prisma.documentRecord.create({data:{storeId,category:kind==="DAILY_SHIFT_REPORT"?"DAILY_REPORT":"OTHER",title:kind==="DAILY_SHIFT_REPORT"?"Daily Shift Report":"Other File",documentDate:docDate,uploadedById:req.user.id,originalName:displayName,storedName:`gdrive:${driveFileId}`,mimeType:req.file.mimetype,fileSize:req.file.size,status:"SUBMITTED"}});driveFileId=null;try{await audit({actorId:req.user.id,action:"UPLOAD",entityType:"DocumentRecord",entityId:doc.id,documentId:doc.id,after:doc});}catch(auditErr){console.error(`Upload audit log failed for document ${doc.id}: ${auditErr.message}`);}res.status(201).json(doc);}catch(e){if(driveFileId)await deleteDriveFile(driveFileId);res.status(e.status||400).json({error:e.message||"Upload failed"});}});
 app.patch("/api/documents/:id",requireAdmin,async(req,res)=>{
  const before=await prisma.documentRecord.findUnique({where:{id:req.params.id}});
  if(!before)return res.status(404).json({error:"File record not found"});
@@ -117,18 +117,128 @@ async function assertDriveFolderAccessible(token){
  if(meta.trashed){console.error(`Google Drive folder check failed: folder ${folderId} is trashed`);throw err;}
  if(meta.mimeType&&meta.mimeType!=="application/vnd.google-apps.folder"){console.error(`Google Drive folder check failed: ${folderId} is not a folder`);throw new Error("Google Drive folder is invalid. Configure a valid folder ID for Google Drive uploads.");}
 }
-async function uploadDriveFile(filename,mimetype,buffer){
+// Google Drive structure is created on demand and reused:
+// PaperWork/<Store>/Images/<Year>/<Month> and
+// PaperWork/<Store>/Worksheets/<Year>.
+const DRIVE_FOLDER_MIME="application/vnd.google-apps.folder";
+async function ensureDriveFolder(token,name,parentId=null){
+ const escaped=String(name).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+ const q=`name='${escaped}' and mimeType='${DRIVE_FOLDER_MIME}' and trashed=false${parentId?` and '${parentId}' in parents`:""}`;
+ const url=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=100&fields=files(id,name,mimeType,parents)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
+ const list=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
+ const data=await list.json();
+ if(!list.ok)throw new Error(data.error?.message||`Could not find Drive folder ${name}`);
+ const matches=data.files||[];
+ if(matches.length>1)throw new Error(`Multiple Google Drive folders named "${name}" exist in the same parent. Please resolve the duplicates before continuing.`);
+ if(matches.length===1)return matches[0].id;
+ const created=await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({name,mimeType:DRIVE_FOLDER_MIME,...(parentId?{parents:[parentId]}:{})})});
+ const folder=await created.json();
+ if(!created.ok||!folder.id)throw new Error(folder.error?.message||`Could not create Drive folder ${name}`);
+ return folder.id;
+}
+async function paperWorkRootFolder(token){
+ const configured=process.env.GOOGLE_DRIVE_FOLDER_ID;
+ if(configured){
+  const check=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(configured)}?fields=id,name,mimeType,trashed`,{headers:{Authorization:`Bearer ${token}`}});
+  const meta=await check.json();
+  if(!check.ok||meta.trashed||meta.mimeType!==DRIVE_FOLDER_MIME)throw new Error("GOOGLE_DRIVE_FOLDER_ID is not an accessible Google Drive folder.");
+  if(meta.name==="PaperWork")return configured;
+ }
+ return ensureDriveFolder(token,"PaperWork",null);
+}
+async function ensureDrivePath(token,segments){
+ let parent=await paperWorkRootFolder(token);
+ for(const segment of segments)parent=await ensureDriveFolder(token,segment,parent);
+ return parent;
+}
+async function moveDriveFileToFolder(fileId,parentId,token){
+ const metaRes=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,parents,trashed`,{headers:{Authorization:`Bearer ${token}`}});
+ const meta=await metaRes.json();
+ if(!metaRes.ok||meta.trashed)throw new Error(meta.error?.message||`Could not access Drive file ${fileId}`);
+ const parents=meta.parents||[];
+ if(parents.includes(parentId))return false;
+ const params=new URLSearchParams({addParents:parentId,fields:"id,parents",supportsAllDrives:"true"});
+ if(parents.length)params.set("removeParents",parents.join(","));
+ const moved=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?${params}`,{method:"PATCH",headers:{Authorization:`Bearer ${token}`}});
+ const result=await moved.json();
+ if(!moved.ok)throw new Error(result.error?.message||`Could not move Drive file ${fileId}`);
+ return true;
+}
+// Organize existing app-linked Drive files into the store-first hierarchy:
+// PaperWork/<Store>/Images/<Year>/<Month> and
+// PaperWork/<Store>/Worksheets/<Year>.
+// Moves existing Drive file IDs; it never downloads, regenerates, replaces, or deletes file contents.
+app.post("/api/admin/drive/organize-existing",requireAdmin,async(req,res)=>{
+ const summary={stores:0,documentsMoved:0,workbooksMoved:0,sheetsMoved:0,alreadyOrganized:0,errors:[]};
+ try{
+  const token=await driveToken();
+  const stores=await prisma.store.findMany({orderBy:{name:"asc"}});
+  const storeById=new Map(stores.map(s=>[s.id,s]));
+  const storeFolders=new Map();
+  const getStoreFolder=async(store)=>{
+   if(!store)throw new Error("Store record is missing for a Drive file");
+   if(!storeFolders.has(store.id))storeFolders.set(store.id,await ensureDrivePath(token,[safeName(store.name)]));
+   return storeFolders.get(store.id);
+  };
+  for(const store of stores){
+   try{
+    const root=await getStoreFolder(store);
+    await ensureDriveFolder(token,"Images",root);
+    await ensureDriveFolder(token,"Worksheets",root);
+    summary.stores++;
+   }catch(e){summary.errors.push({store:store.name,error:e.message});}
+  }
+  const docs=await prisma.documentRecord.findMany({where:{storedName:{startsWith:"gdrive:"}},include:{store:true}});
+  for(const doc of docs){
+   try{
+    const dt=doc.documentDate||doc.createdAt||new Date();
+    const year=String(new Date(dt).getUTCFullYear());
+    const month=String(new Date(dt).getUTCMonth()+1).padStart(2,"0");
+    const target=await ensureDrivePath(token,[safeName(doc.store?.name),"Images",year,month]);
+    const moved=await moveDriveFileToFolder(doc.storedName.slice(7),target,token);
+    if(moved)summary.documentsMoved++;else summary.alreadyOrganized++;
+   }catch(e){summary.errors.push({file:doc.originalName||doc.id,error:e.message});}
+  }
+  const entries=await prisma.auditLog.findMany({where:{entityType:{in:["MonthlyExcelWorkbook","GoogleSheet"]},action:{in:["MONTHLY_XLSX","MONTHLY_SHEET"]}},orderBy:{createdAt:"desc"}});
+  const handled=new Set();
+  for(const entry of entries){
+   try{
+    const parts=String(entry.entityId||"").split(":");
+    if(parts.length!==3)continue;
+    const [storeId,year,month]=parts;
+    const store=storeById.get(storeId);
+    const fileId=entry.entityType==="GoogleSheet"?entry.after?.spreadsheetId:entry.after?.fileId;
+    if(!store||!fileId)continue;
+    const key=`${entry.entityType}:${fileId}`;
+    if(handled.has(key))continue;
+    handled.add(key);
+    const target=await ensureDrivePath(token,[safeName(store.name),"Worksheets",String(year)]);
+    const moved=await moveDriveFileToFolder(fileId,target,token);
+    if(moved){if(entry.entityType==="GoogleSheet")summary.sheetsMoved++;else summary.workbooksMoved++;}
+    else summary.alreadyOrganized++;
+   }catch(e){summary.errors.push({file:entry.after?.name||entry.after?.fileId||entry.after?.spreadsheetId||entry.entityId,error:e.message});}
+  }
+  res.json({ok:summary.errors.length===0,structure:"PaperWork/<Store>/{Images,Worksheets}",...summary,message:summary.errors.length?"Drive organization completed with some items needing attention.":"Google Drive files are organized by store."});
+ }catch(e){
+  console.error(`Google Drive organization failed: ${e.message}`);
+  res.status(400).json({error:e.message||"Could not organize Google Drive files",...summary});
+ }
+});
+
+async function uploadDriveFile(filename,mimetype,buffer,store,documentDate){
  const token=await driveToken();
  await assertDriveFolderAccessible(token);
+ const date=new Date(documentDate||Date.now());
+ const year=String(date.getUTCFullYear()),month=String(date.getUTCMonth()+1).padStart(2,"0");
+ const parentId=await ensureDrivePath(token,[safeName(store?.name),"Images",year,month]);
  const boundary=`pw_${crypto.randomBytes(8).toString("hex")}`;
  const mime=mimetype||"application/octet-stream";
- const metadata={name:filename,mimeType:mime,...(process.env.GOOGLE_DRIVE_FOLDER_ID?{parents:[process.env.GOOGLE_DRIVE_FOLDER_ID]}:{})};
+ const metadata={name:filename,mimeType:mime,parents:[parentId]};
  const body=Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`),buffer,Buffer.from(`\r\n--${boundary}--`)]);
- const response=await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":`multipart/related; boundary=${boundary}`},body});
+ const response=await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,parents",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":`multipart/related; boundary=${boundary}`},body});
  const file=await response.json();
  if(!response.ok||!file.id){
   console.error(`Google Drive upload failed (${response.status}): ${file.error?.message||"unknown error"}`);
-  if(response.status===404)throw new Error("Google Drive folder is not found or not accessible by the connected Google account.");
   throw new Error(file.error?.message||"Could not upload file to Google Drive");
  }
  return file;
@@ -166,41 +276,29 @@ async function streamDriveFile(res,d){
   return res.send(buffer);
  }catch(e){if(!res.headersSent)return res.status(502).json({error:"Could not retrieve file from Google Drive"});return res.end();}
 }
-// TEMPORARY: creates and verifies the app-owned Google Drive upload folder.
-// Authenticated users only (global /api auth middleware applies). Remove this
-// endpoint after the folder ID has been copied to GOOGLE_DRIVE_FOLDER_ID.
+// Creates/verifies the PaperWork root folder. The returned ID can be used as
+// GOOGLE_DRIVE_FOLDER_ID; if it is already configured as PaperWork, it is reused.
 app.post("/api/admin/drive/create-folder",requireAdmin,async(req,res)=>{
  try{
   const token=await driveToken();
-  const folderName="Paper Work App Uploads";
-  const q=`name='${folderName.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const list=await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=10&fields=files(id,name,mimeType,trashed)`,{headers:{Authorization:`Bearer ${token}`}});
-  const found=await list.json();
-  if(!list.ok){console.error(`Drive folder search failed (${list.status})`);return res.status(502).json({error:"Could not search Google Drive for the upload folder"});}
-  let folder=(found.files||[]).find(f=>f.name===folderName);
-  const existing=!!folder;
-  if(!folder){
-   const create=await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({name:folderName,mimeType:"application/vnd.google-apps.folder"})});
-   folder=await create.json();
-   if(!create.ok||!folder.id){console.error(`Drive folder create failed (${create.status}): ${folder.error?.message||"unknown"}`);return res.status(502).json({error:"Could not create Google Drive folder"});}
-  }
-  const check=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folder.id)}?fields=id,name,mimeType,trashed`,{headers:{Authorization:`Bearer ${token}`}});
-  const meta=await check.json();
-  if(!check.ok||meta.trashed||meta.mimeType!=="application/vnd.google-apps.folder"){console.error(`Drive folder verification failed for folder ${folder.id} (${check.status})`);return res.status(502).json({error:"Could not verify Google Drive folder"});}
-  res.json({name:meta.name,folderId:meta.id,mimeType:meta.mimeType,verified:true,existing});
- }catch(e){console.error(`Drive create-folder failed: ${e.message}`);return res.status(400).json({error:e.message||"Could not create Google Drive folder"});}
+  const folderId=await paperWorkRootFolder(token);
+  const check=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType,trashed`,{headers:{Authorization:`Bearer ${token}`}});
+  const folder=await check.json();
+  if(!check.ok||folder.trashed||folder.mimeType!==DRIVE_FOLDER_MIME)throw new Error("Could not verify the PaperWork root folder");
+  res.json({name:folder.name,folderId:folder.id,mimeType:folder.mimeType,verified:true});
+ }catch(e){console.error(`Drive root folder setup failed: ${e.message}`);res.status(400).json({error:e.message||"Could not create Google Drive root folder"});}
 });
 app.get("/api/drive/status",requireAdmin,async(req,res)=>{const c=await prisma.auditLog.findFirst({where:{entityType:"GoogleDrive",action:"TOKEN"},orderBy:{createdAt:"desc"}});res.json({connected:!!c,folderConfigured:!!process.env.GOOGLE_DRIVE_FOLDER_ID,clientConfigured:!!process.env.GOOGLE_CLIENT_ID,email:c?.after?.email||null});});
 app.get("/api/drive/connect",requireAdmin,async(req,res)=>{if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET)return res.status(400).json({error:"Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI first."});const state=jwt.sign({adminId:req.user.id},process.env.JWT_SECRET,{expiresIn:"10m"});const u=new URL("https://accounts.google.com/o/oauth2/v2/auth");u.search=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:process.env.GOOGLE_REDIRECT_URI, response_type:"code",scope:"https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets email",access_type:"offline",prompt:"consent",state}).toString();res.json({url:u.toString()});});
 app.get("/api/drive/callback",async(req,res)=>{try{const payload=jwt.verify(String(req.query.state||""),process.env.JWT_SECRET);const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:String(req.query.code||""),client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:process.env.GOOGLE_REDIRECT_URI,grant_type:"authorization_code"})});const j=await r.json();if(!r.ok||!j.refresh_token)throw new Error(j.error_description||"Google did not return a refresh token. Revoke app access and connect again.");const info=await fetch("https://www.googleapis.com/oauth2/v2/userinfo",{headers:{Authorization:`Bearer ${j.access_token}`}}).then(x=>x.json());await audit({actorId:payload.adminId,action:"TOKEN",entityType:"GoogleDrive",entityId:"primary",after:{refreshToken:j.refresh_token,email:info.email}});res.send("<h2>Google Drive connected.</h2><p>You can close this tab and return to Paper Work.</p>");}catch(e){res.status(400).send(`<h2>Google Drive connection failed</h2><p>${String(e.message).replace(/[<>]/g,"")}</p>`);}});
 // Create a new XLSX in Drive. This helper NEVER updates or replaces an existing file.
-async function createDriveExcelFile(filename, buffer) {
+async function createDriveExcelFile(filename, buffer, parentId) {
  const token=await driveToken();
  const boundary=`pw_${crypto.randomBytes(8).toString("hex")}`;
  const metadata={
   name:filename,
   mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ...(process.env.GOOGLE_DRIVE_FOLDER_ID?{parents:[process.env.GOOGLE_DRIVE_FOLDER_ID]}:{})
+  parents:[parentId]
  };
  const body=Buffer.concat([
   Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n`),
@@ -237,9 +335,9 @@ async function driveGetFile(fileId,token){
  return file;
 }
 
-async function findDriveExcelFiles(filename,token){
+async function findDriveExcelFiles(filename,token,parentId){
  const escaped=filename.replace(/\\/g,"\\\\").replace(/'/g,"\\'");
- const query=`name='${escaped}' and trashed=false${process.env.GOOGLE_DRIVE_FOLDER_ID?` and '${process.env.GOOGLE_DRIVE_FOLDER_ID}' in parents`:""}`;
+ const query=`name='${escaped}' and trashed=false${parentId?` and '${parentId}' in parents`:""}`;
  const url=`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&pageSize=1000&fields=files(id,name,webViewLink,mimeType,trashed)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
  const response=await fetch(url,{headers:{Authorization:`Bearer ${token}`}});
  const result=await response.json();
@@ -289,10 +387,15 @@ app.get("/api/stores/:id/monthly-sheet",requireAdmin,async(req,res)=>{try{
  if(saved?.after?.spreadsheetId){
   const check=await fetch(`https://www.googleapis.com/drive/v3/files/${saved.after.spreadsheetId}?fields=id,name,webViewLink,trashed`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
   if(!check.id||check.trashed) saved=null;
-  else return res.json({url:check.webViewLink||`https://docs.google.com/spreadsheets/d/${check.id}/edit`,spreadsheetId:check.id,existing:true});
+  else {
+   const sheetFolder=await ensureDrivePath(token,[safeName(store.name),"Worksheets",String(y)]);
+   await moveDriveFileToFolder(check.id,sheetFolder,token);
+   return res.json({url:check.webViewLink||`https://docs.google.com/spreadsheets/d/${check.id}/edit`,spreadsheetId:check.id,existing:true});
+  }
  }
  const filename=`${safeName(store.name)}_${y}-${String(m).padStart(2,"0")}`;
- const create=await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({name:filename,mimeType:"application/vnd.google-apps.spreadsheet",...(process.env.GOOGLE_DRIVE_FOLDER_ID?{parents:[process.env.GOOGLE_DRIVE_FOLDER_ID]}:{})})});
+ const sheetFolder=await ensureDrivePath(token,[safeName(store.name),"Worksheets",String(y)]);
+ const create=await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({name:filename,mimeType:"application/vnd.google-apps.spreadsheet",parents:[sheetFolder]})});
  const file=await create.json();if(!create.ok)throw new Error(file.error?.message||"Could not create Google Sheet");
  const {rows}=await buildMonthlyWorkbook(store,y,m);
  const values=[["PAPER WORK — MONTHLY STORE WORKBOOK"],["Store",store.name],["Month",`${String(m).padStart(2,"0")}/${y}`],["Report Date","File Name","File Type","Upload Time (IST)","Slip Details","Amount","Currency","Notes","Entered By"],...rows.map(r=>[r["Report Date"],r["File Name"],r["File Type"],r["Upload Time (IST)"],r["Slip Details"],r.Amount,r.Currency,r.Notes,r["Entered By"]])];
@@ -345,11 +448,33 @@ app.get("/api/stores/:id/monthly.xlsx",requireAdmin,async(req,res)=>{try{
     error.status=404;
     throw error;
    }
+   const workbookFolder=await ensureDrivePath(token,[safeName(store.name),"Worksheets",String(y)]);
+   await moveDriveFileToFolder(existing.id,workbookFolder,token);
    return {file:existing,existing:true};
   }
 
+  // Store monthly workbooks under PaperWork/<Store>/Worksheets/<Year>.
+  const workbookFolder=await ensureDrivePath(token,[safeName(store.name),"Worksheets",String(y)]);
+
   // Adopt one pre-existing matching workbook instead of replacing it.
-  const matches=await findDriveExcelFiles(filename,token);
+  let matches=await findDriveExcelFiles(filename,token,workbookFolder);
+  // Backward compatibility: find a workbook left in the previous upload folder
+  // (or My Drive root) and move the same file instead of creating a replacement.
+  if(matches.length===0){
+   const legacyParent=process.env.GOOGLE_DRIVE_FOLDER_ID||null;
+   if(legacyParent!==workbookFolder){
+    const legacyMatches=await findDriveExcelFiles(filename,token,legacyParent);
+    if(legacyMatches.length>1){
+     const error=new Error(`Found ${legacyMatches.length} older Excel files named "${filename}". Resolve the duplicates manually; Paper Work will not guess or overwrite either file.`);
+     error.status=409;
+     throw error;
+    }
+    if(legacyMatches.length===1){
+     await moveDriveFileToFolder(legacyMatches[0].id,workbookFolder,token);
+     matches=legacyMatches;
+    }
+   }
+  }
   if(matches.length>1){
    const error=new Error(`Found ${matches.length} Excel files named "${filename}" in the configured Drive folder. Resolve the duplicates manually; Paper Work will not guess or overwrite either file.`);
    error.status=409;
@@ -363,7 +488,7 @@ app.get("/api/stores/:id/monthly.xlsx",requireAdmin,async(req,res)=>{try{
 
   // First opening only: generate and create the workbook once.
   const {buffer,rows}=await buildMonthlyWorkbook(store,y,m);
-  const file=await createDriveExcelFile(filename,buffer);
+  const file=await createDriveExcelFile(filename,buffer,workbookFolder);
   await audit({actorId:req.user.id,action:"MONTHLY_XLSX",entityType:"MonthlyExcelWorkbook",entityId,after:{fileId:file.id,name:filename,storeId:store.id,year:y,month:m,initialRows:rows.length}});
   return {file,existing:false,entries:rows.length};
  });
