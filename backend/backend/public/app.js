@@ -434,6 +434,17 @@ on('#connectDrive','click',async () => {
     window.location.href = result.url;
   } catch (e) { toast(e.message,true); }
 });
+on('#organizeDrive','click',async () => {
+  const button = $('#organizeDrive');
+  if (!confirm('Organize existing Paper Work files in Google Drive? This moves files into folders but does not change their contents.')) return;
+  button.disabled = true;
+  try {
+    const result = await api('/api/admin/drive/organize-existing', { method:'POST' });
+    const detail = `Moved ${result.movedDocuments} uploaded files and ${result.movedWorkbooks} workbooks. ${result.skipped} skipped.`;
+    toast(result.errors?.length ? `${detail} ${result.errors.length} items need attention.` : `${detail} Google Drive is organized.`, !!result.errors?.length);
+  } catch (e) { toast(e.message,true); }
+  finally { button.disabled = false; }
+});
 attachUploadForm($('#dailyUploadForm'),'DAILY_SHIFT_REPORT','dailyError');
 attachUploadForm($('#otherUploadForm'),'OTHER_FILE','otherError');
 
