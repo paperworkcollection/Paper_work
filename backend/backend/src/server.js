@@ -18,8 +18,8 @@ const uploadDir=path.resolve(process.env.UPLOAD_DIR||"./private-uploads"); fs.mk
 app.use(helmet({crossOriginResourcePolicy:{policy:"cross-origin"}}));
 app.use(cors({origin:process.env.CORS_ORIGIN?.split(",")||true})); app.use(express.json({limit:"2mb"}));
 app.use(express.static(path.resolve("./public")));
-const storage=multer.diskStorage({destination:(_r,_f,cb)=>cb(null,uploadDir),filename:(_r,f,cb)=>cb(null,`${crypto.randomUUID()}${path.extname(f.originalname).slice(0,12)}`)});
-const upload=multer({storage,limits:{fileSize:25*1024*1024},fileFilter:(_r,f,cb)=>cb(null,/^(image\/(jpeg|png|webp)|application\/pdf|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/msword|application\/vnd\.ms-excel)$/.test(f.mimetype))});
+const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024},fileFilter:(_r,f,cb)=>cb(null,/^(image\/(jpeg|png|webp)|application\/pdf|application\/vnd\.openxmlformats-officedocument\.(spreadsheetml\.sheet|wordprocessingml\.document)|application\/msword|application\/vnd\.ms-excel)$/.test(f.mimetype))});
+const uploadOne=(req,res,next)=>upload.single("file")(req,res,e=>e?res.status(400).json({error:e.message||"Upload failed"}):next());
 const signToken=u=>jwt.sign({sub:u.id,role:u.role},process.env.JWT_SECRET,{expiresIn:"12h"});
 const cleanUser=({passwordHash,...u})=>u;
 const safeName=s=>String(s||"store").normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-zA-Z0-9]+/g,"_").replace(/^_|_$/g,"").slice(0,70)||"Store";
@@ -55,7 +55,7 @@ app.delete("/api/stores/:id",requireAdmin,async(req,res)=>{
  await prisma.monthlySlipEntry.deleteMany({where:{storeId:store.id}});
  await prisma.user.updateMany({where:{storeId:store.id},data:{storeId:null,active:false}});
  await prisma.store.delete({where:{id:store.id}});
- for(const d of docs){if(d.storedName){const f=path.join(uploadDir,path.basename(d.storedName));if(fs.existsSync(f))fs.unlink(f,()=>{});}}
+ for(const d of docs){if(!d.storedName)continue;if(d.storedName.startsWith("gdrive:")){await deleteDriveFile(d.storedName.slice(7));continue;}const f=path.join(uploadDir,path.basename(d.storedName));if(fs.existsSync(f))fs.unlink(f,()=>{});}
  await audit({actorId:req.user.id,action:"DELETE",entityType:"Store",entityId:store.id,before:{...store,deletedDocumentCount:docs.length}});
  res.json({ok:true,deletedDocuments:docs.length});
 });
@@ -88,7 +88,7 @@ app.delete("/api/users/:id",requireAdmin,async(req,res)=>{
  res.json({ok:true});
 });
 app.get("/api/documents",async(req,res)=>{const {storeId,from,to,date,month,year,q,kind}=req.query;const effective=storeScope(req.user,storeId);const where={...(effective?{storeId:effective}:{}),...(date?{documentDate:{gte:dateOnly(date),lt:new Date(dateOnly(date).getTime()+86400000)}}:{}),...(from||to?{documentDate:{...(from?{gte:dateOnly(from)}:{}),...(to?{lt:new Date(dateOnly(to).getTime()+86400000)}:{})}}:{}),...(q?{OR:[{title:{contains:String(q),mode:"insensitive"}},{originalName:{contains:String(q),mode:"insensitive"}},{store:{is:{name:{contains:String(q),mode:"insensitive"}}}}]}:{})};let docs=await prisma.documentRecord.findMany({where,include:{store:true,uploadedBy:{select:{id:true,name:true,email:true}}},orderBy:{createdAt:"desc"}});docs=docs.filter(d=>{const dt=d.documentDate||d.createdAt;return(!month||dt.getUTCMonth()+1===Number(month))&&(!year||dt.getUTCFullYear()===Number(year))&&(!kind||(kind==="DAILY_SHIFT_REPORT"?d.category==="DAILY_REPORT":d.category==="OTHER"&&d.title.startsWith("Other File")));});res.json(docs);});
-app.post("/api/documents",upload.single("file"),async(req,res)=>{try{if(!req.file)return res.status(400).json({error:"Choose a file to upload"});const body=req.body||{},kind=body.kind||"DAILY_SHIFT_REPORT";if(!["DAILY_SHIFT_REPORT","OTHER_FILE"].includes(kind))return res.status(400).json({error:"Invalid upload type"});const storeId=req.user.role==="SUPER_ADMIN"?body.storeId:req.user.storeId;if(!storeId)return res.status(400).json({error:"No store is assigned to this account"});if(req.user.role!=="SUPER_ADMIN"&&body.storeId&&body.storeId!==req.user.storeId)return res.status(403).json({error:"You can upload only to your assigned store"});const store=await prisma.store.findUnique({where:{id:storeId}});if(!store||!store.active)return res.status(404).json({error:"Active store not found"});const day=String(body.documentDate||dateString()).slice(0,10),docDate=dateOnly(day);if(kind==="DAILY_SHIFT_REPORT"){const exists=await prisma.documentRecord.findFirst({where:{storeId,category:"DAILY_REPORT",documentDate:docDate}});if(exists)return res.status(409).json({error:"Today's Daily Shift Report has already been uploaded for this store."});}const ext=path.extname(req.file.originalname).toLowerCase()||".jpg";let displayName=`${safeName(store.name)}_${day}${kind==="OTHER_FILE"?`_Other_${Date.now().toString().slice(-5)}`:""}${ext}`;const same=await prisma.documentRecord.findFirst({where:{storeId,originalName:displayName}});if(same)displayName=displayName.replace(ext,`_${crypto.randomBytes(2).toString("hex")}${ext}`);const doc=await prisma.documentRecord.create({data:{storeId,category:kind==="DAILY_SHIFT_REPORT"?"DAILY_REPORT":"OTHER",title:kind==="DAILY_SHIFT_REPORT"?"Daily Shift Report":"Other File",documentDate:docDate,uploadedById:req.user.id,originalName:displayName,storedName:req.file.filename,mimeType:req.file.mimetype,fileSize:req.file.size,status:"SUBMITTED"}});await audit({actorId:req.user.id,action:"UPLOAD",entityType:"DocumentRecord",entityId:doc.id,documentId:doc.id,after:doc});res.status(201).json(doc);}catch(e){if(req.file)fs.unlink(req.file.path,()=>{});res.status(400).json({error:e.message||"Upload failed"});}});
+app.post("/api/documents",uploadOne,async(req,res)=>{let driveFileId=null;try{if(!req.file)return res.status(400).json({error:"Choose a file to upload"});const body=req.body||{},kind=body.kind||"DAILY_SHIFT_REPORT";if(!["DAILY_SHIFT_REPORT","OTHER_FILE"].includes(kind))return res.status(400).json({error:"Invalid upload type"});const storeId=req.user.role==="SUPER_ADMIN"?body.storeId:req.user.storeId;if(!storeId)return res.status(400).json({error:"No store is assigned to this account"});if(req.user.role!=="SUPER_ADMIN"&&body.storeId&&body.storeId!==req.user.storeId)return res.status(403).json({error:"You can upload only to your assigned store"});const store=await prisma.store.findUnique({where:{id:storeId}});if(!store||!store.active)return res.status(404).json({error:"Active store not found"});const day=String(body.documentDate||dateString()).slice(0,10),docDate=dateOnly(day);if(kind==="DAILY_SHIFT_REPORT"){const exists=await prisma.documentRecord.findFirst({where:{storeId,category:"DAILY_REPORT",documentDate:docDate}});if(exists)return res.status(409).json({error:"Today's Daily Shift Report has already been uploaded for this store."});}const ext=path.extname(req.file.originalname).toLowerCase()||".jpg";let displayName=`${safeName(store.name)}_${day}${kind==="OTHER_FILE"?`_Other_${Date.now().toString().slice(-5)}`:""}${ext}`;const same=await prisma.documentRecord.findFirst({where:{storeId,originalName:displayName}});if(same)displayName=displayName.replace(ext,`_${crypto.randomBytes(2).toString("hex")}${ext}`);const driveFile=await uploadDriveFile(displayName,req.file.mimetype,req.file.buffer);driveFileId=driveFile.id;if(!driveFileId)throw new Error("Google Drive did not return a file ID");const doc=await prisma.documentRecord.create({data:{storeId,category:kind==="DAILY_SHIFT_REPORT"?"DAILY_REPORT":"OTHER",title:kind==="DAILY_SHIFT_REPORT"?"Daily Shift Report":"Other File",documentDate:docDate,uploadedById:req.user.id,originalName:displayName,storedName:`gdrive:${driveFileId}`,mimeType:req.file.mimetype,fileSize:req.file.size,status:"SUBMITTED"}});driveFileId=null;try{await audit({actorId:req.user.id,action:"UPLOAD",entityType:"DocumentRecord",entityId:doc.id,documentId:doc.id,after:doc});}catch(auditErr){console.error(`Upload audit log failed for document ${doc.id}: ${auditErr.message}`);}res.status(201).json(doc);}catch(e){if(driveFileId)await deleteDriveFile(driveFileId);res.status(e.status||400).json({error:e.message||"Upload failed"});}});
 app.patch("/api/documents/:id",requireAdmin,async(req,res)=>{
  const before=await prisma.documentRecord.findUnique({where:{id:req.params.id}});
  if(!before)return res.status(404).json({error:"File record not found"});
@@ -101,10 +101,95 @@ app.patch("/api/documents/:id",requireAdmin,async(req,res)=>{
  await audit({actorId:req.user.id,action:"UPDATE",entityType:"DocumentRecord",entityId:doc.id,documentId:doc.id,before,after:doc});
  res.json(doc);
 });
-app.get("/api/documents/:id/file",async(req,res)=>{const d=await prisma.documentRecord.findUnique({where:{id:req.params.id}});if(!d||!d.storedName)return res.status(404).json({error:"File not found"});if(req.user.role!=="SUPER_ADMIN"&&d.storeId!==req.user.storeId)return res.status(403).json({error:"Access denied"});const p=path.join(uploadDir,path.basename(d.storedName));if(!fs.existsSync(p))return res.status(404).json({error:"File is missing from server storage"});res.download(p,d.originalName||"paper-work-file");});
-app.delete("/api/documents/:id",requireAdmin,async(req,res)=>{const d=await prisma.documentRecord.findUnique({where:{id:req.params.id}});if(!d)return res.status(404).json({error:"File not found"});await prisma.documentRecord.delete({where:{id:d.id}});if(d.storedName){const p=path.join(uploadDir,path.basename(d.storedName));if(fs.existsSync(p))fs.unlinkSync(p);}await audit({actorId:req.user.id,action:"DELETE",entityType:"DocumentRecord",entityId:d.id,before:d});res.json({ok:true});});
+app.get("/api/documents/:id/file",async(req,res)=>{const d=await prisma.documentRecord.findUnique({where:{id:req.params.id}});if(!d||!d.storedName)return res.status(404).json({error:"File not found"});if(req.user.role!=="SUPER_ADMIN"&&d.storeId!==req.user.storeId)return res.status(403).json({error:"Access denied"});if(d.storedName.startsWith("gdrive:"))return streamDriveFile(res,d);const p=path.join(uploadDir,path.basename(d.storedName));if(!fs.existsSync(p))return res.status(404).json({error:"File is missing from server storage"});res.download(p,d.originalName||"paper-work-file");});
+app.delete("/api/documents/:id",requireAdmin,async(req,res)=>{const d=await prisma.documentRecord.findUnique({where:{id:req.params.id}});if(!d)return res.status(404).json({error:"File not found"});if(d.storedName&&d.storedName.startsWith("gdrive:")){try{await deleteDriveFile(d.storedName.slice(7),null,true);}catch{return res.status(502).json({error:"Could not delete file from Google Drive. The file record was not deleted."});}}await prisma.documentRecord.delete({where:{id:d.id}});if(d.storedName&&!d.storedName.startsWith("gdrive:")){const p=path.join(uploadDir,path.basename(d.storedName));if(fs.existsSync(p))fs.unlinkSync(p);}await audit({actorId:req.user.id,action:"DELETE",entityType:"DocumentRecord",entityId:d.id,before:d});res.json({ok:true});});
 // Google Drive OAuth: refresh token is stored in the admin's MongoDB record after consent.
 async function driveToken(){if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET)throw new Error("Google Drive is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend environment.");const auth=await prisma.auditLog.findFirst({where:{entityType:"GoogleDrive",action:"TOKEN"},orderBy:{createdAt:"desc"}});const refreshToken=auth?.after?.refreshToken;if(!refreshToken)throw new Error("Connect your Google Drive first from the Admin dashboard.");const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,refresh_token:refreshToken,grant_type:"refresh_token"})});const j=await r.json();if(!r.ok)throw new Error(j.error_description||"Google token refresh failed");return j.access_token;}
+async function assertDriveFolderAccessible(token){
+ const folderId=process.env.GOOGLE_DRIVE_FOLDER_ID;
+ if(!folderId)return;
+ const err=new Error("Google Drive folder is not found or not accessible by the connected Google account.");
+ let r;
+ try{r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,mimeType,trashed`,{headers:{Authorization:`Bearer ${token}`}});}catch(e){throw new Error("Could not verify Google Drive folder");}
+ if(r.status===404){console.error(`Google Drive folder check failed: folder ${folderId} not found or not accessible to the connected account`);throw err;}
+ if(!r.ok){console.error(`Google Drive folder check failed (${r.status}) for folder ${folderId}`);throw new Error("Could not verify Google Drive folder");}
+ const meta=await r.json();
+ if(meta.trashed){console.error(`Google Drive folder check failed: folder ${folderId} is trashed`);throw err;}
+ if(meta.mimeType&&meta.mimeType!=="application/vnd.google-apps.folder"){console.error(`Google Drive folder check failed: ${folderId} is not a folder`);throw new Error("Google Drive folder is invalid. Configure a valid folder ID for Google Drive uploads.");}
+}
+async function uploadDriveFile(filename,mimetype,buffer){
+ const token=await driveToken();
+ await assertDriveFolderAccessible(token);
+ const boundary=`pw_${crypto.randomBytes(8).toString("hex")}`;
+ const mime=mimetype||"application/octet-stream";
+ const metadata={name:filename,mimeType:mime,...(process.env.GOOGLE_DRIVE_FOLDER_ID?{parents:[process.env.GOOGLE_DRIVE_FOLDER_ID]}:{})};
+ const body=Buffer.concat([Buffer.from(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`),buffer,Buffer.from(`\r\n--${boundary}--`)]);
+ const response=await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":`multipart/related; boundary=${boundary}`},body});
+ const file=await response.json();
+ if(!response.ok||!file.id){
+  console.error(`Google Drive upload failed (${response.status}): ${file.error?.message||"unknown error"}`);
+  if(response.status===404)throw new Error("Google Drive folder is not found or not accessible by the connected Google account.");
+  throw new Error(file.error?.message||"Could not upload file to Google Drive");
+ }
+ return file;
+}
+async function deleteDriveFile(fileId,token,strict=false){
+ if(!fileId)return true;
+ try{
+  const t=token||await driveToken();
+  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`,{method:"DELETE",headers:{Authorization:`Bearer ${t}`}});
+  if(r.ok||r.status===404)return true;
+  const msg=`Google Drive delete failed (${r.status}) for file ${fileId}`;
+  if(strict)throw new Error(msg);
+  console.error(msg);return false;
+ }catch(e){if(strict)throw e;console.error(`Google Drive delete failed for file ${fileId}: ${e.message}`);return false;}
+}
+async function streamDriveFile(res,d){
+ const fileId=d.storedName.slice("gdrive:".length);
+ if(!fileId)return res.status(404).json({error:"File is missing from Google Drive"});
+ let token;
+ try{token=await driveToken();}catch(e){return res.status(400).json({error:e.message||"Google Drive is not available"});}
+ try{
+  const metaRes=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,trashed`,{headers:{Authorization:`Bearer ${token}`}});
+  if(metaRes.status===404)return res.status(404).json({error:"File is missing from Google Drive"});
+  if(!metaRes.ok)return res.status(502).json({error:"Could not retrieve file from Google Drive"});
+  const meta=await metaRes.json();
+  if(meta.trashed)return res.status(404).json({error:"File is missing from Google Drive"});
+  const dl=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,{headers:{Authorization:`Bearer ${token}`}});
+  if(dl.status===404)return res.status(404).json({error:"File is missing from Google Drive"});
+  if(!dl.ok)return res.status(502).json({error:"Could not retrieve file from Google Drive"});
+  const buffer=Buffer.from(await dl.arrayBuffer());
+  const filename=d.originalName||meta.name||"paper-work-file";
+  res.setHeader("Content-Type",d.mimeType||meta.mimeType||"application/octet-stream");
+  res.setHeader("Content-Disposition",`attachment; filename="${String(filename).replace(/["\r\n]/g,"_")}"`);
+  res.setHeader("Content-Length",buffer.length);
+  return res.send(buffer);
+ }catch(e){if(!res.headersSent)return res.status(502).json({error:"Could not retrieve file from Google Drive"});return res.end();}
+}
+// TEMPORARY: creates and verifies the app-owned Google Drive upload folder.
+// Authenticated users only (global /api auth middleware applies). Remove this
+// endpoint after the folder ID has been copied to GOOGLE_DRIVE_FOLDER_ID.
+app.post("/api/admin/drive/create-folder",requireAdmin,async(req,res)=>{
+ try{
+  const token=await driveToken();
+  const folderName="Paper Work App Uploads";
+  const q=`name='${folderName.replace(/\\/g,"\\\\").replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const list=await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&pageSize=10&fields=files(id,name,mimeType,trashed)`,{headers:{Authorization:`Bearer ${token}`}});
+  const found=await list.json();
+  if(!list.ok){console.error(`Drive folder search failed (${list.status})`);return res.status(502).json({error:"Could not search Google Drive for the upload folder"});}
+  let folder=(found.files||[]).find(f=>f.name===folderName);
+  const existing=!!folder;
+  if(!folder){
+   const create=await fetch("https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType",{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({name:folderName,mimeType:"application/vnd.google-apps.folder"})});
+   folder=await create.json();
+   if(!create.ok||!folder.id){console.error(`Drive folder create failed (${create.status}): ${folder.error?.message||"unknown"}`);return res.status(502).json({error:"Could not create Google Drive folder"});}
+  }
+  const check=await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folder.id)}?fields=id,name,mimeType,trashed`,{headers:{Authorization:`Bearer ${token}`}});
+  const meta=await check.json();
+  if(!check.ok||meta.trashed||meta.mimeType!=="application/vnd.google-apps.folder"){console.error(`Drive folder verification failed for folder ${folder.id} (${check.status})`);return res.status(502).json({error:"Could not verify Google Drive folder"});}
+  res.json({name:meta.name,folderId:meta.id,mimeType:meta.mimeType,verified:true,existing});
+ }catch(e){console.error(`Drive create-folder failed: ${e.message}`);return res.status(400).json({error:e.message||"Could not create Google Drive folder"});}
+});
 app.get("/api/drive/status",requireAdmin,async(req,res)=>{const c=await prisma.auditLog.findFirst({where:{entityType:"GoogleDrive",action:"TOKEN"},orderBy:{createdAt:"desc"}});res.json({connected:!!c,folderConfigured:!!process.env.GOOGLE_DRIVE_FOLDER_ID,clientConfigured:!!process.env.GOOGLE_CLIENT_ID,email:c?.after?.email||null});});
 app.get("/api/drive/connect",requireAdmin,async(req,res)=>{if(!process.env.GOOGLE_CLIENT_ID||!process.env.GOOGLE_CLIENT_SECRET)return res.status(400).json({error:"Configure GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI first."});const state=jwt.sign({adminId:req.user.id},process.env.JWT_SECRET,{expiresIn:"10m"});const u=new URL("https://accounts.google.com/o/oauth2/v2/auth");u.search=new URLSearchParams({client_id:process.env.GOOGLE_CLIENT_ID,redirect_uri:process.env.GOOGLE_REDIRECT_URI, response_type:"code",scope:"https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets email",access_type:"offline",prompt:"consent",state}).toString();res.json({url:u.toString()});});
 app.get("/api/drive/callback",async(req,res)=>{try{const payload=jwt.verify(String(req.query.state||""),process.env.JWT_SECRET);const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code:String(req.query.code||""),client_id:process.env.GOOGLE_CLIENT_ID,client_secret:process.env.GOOGLE_CLIENT_SECRET,redirect_uri:process.env.GOOGLE_REDIRECT_URI,grant_type:"authorization_code"})});const j=await r.json();if(!r.ok||!j.refresh_token)throw new Error(j.error_description||"Google did not return a refresh token. Revoke app access and connect again.");const info=await fetch("https://www.googleapis.com/oauth2/v2/userinfo",{headers:{Authorization:`Bearer ${j.access_token}`}}).then(x=>x.json());await audit({actorId:payload.adminId,action:"TOKEN",entityType:"GoogleDrive",entityId:"primary",after:{refreshToken:j.refresh_token,email:info.email}});res.send("<h2>Google Drive connected.</h2><p>You can close this tab and return to Paper Work.</p>");}catch(e){res.status(400).send(`<h2>Google Drive connection failed</h2><p>${String(e.message).replace(/[<>]/g,"")}</p>`);}});
