@@ -60,11 +60,11 @@
           <div class="page-heading"><div><div class="eyebrow">YOUR WORKSPACE</div><h1 id="welcomeTitle">Welcome</h1><p id="homeSubtitle">Upload and view your store's daily reports.</p></div></div>
 
           <div id="managerPanel" class="panel upload-panel">
-            <div><span class="eyebrow">REQUIRED DAILY SUBMISSION</span><h2>Daily Shift Report</h2><p>Upload one report image for your store each day.</p></div>
-            <form id="dailyUploadForm"><input type="file" name="file" accept="image/jpeg,image/png,image/webp" required><button class="btn btn-primary" type="submit">Upload Daily Shift Report</button><div class="form-error" id="dailyError"></div></form>
+            <div><span class="eyebrow">DAILY SHIFT REPORT</span><h2>Daily Shift Report</h2><p>Select the report date and upload one or more images. Multiple images are allowed for the same date.</p></div>
+            <form id="dailyUploadForm"><label class="upload-date-label" for="dailyDocumentDate">Report date</label><input id="dailyDocumentDate" name="documentDate" type="date" required><input type="file" name="file" accept="image/jpeg,image/png,image/webp" required><button class="btn btn-primary" type="submit">Upload Daily Shift Report</button><div class="form-error" id="dailyError"></div></form>
             <div class="upload-divider"></div>
-            <div><span class="eyebrow">OPTIONAL</span><h2>Other Files</h2><p>Upload additional documents or images whenever needed.</p></div>
-            <form id="otherUploadForm"><input type="file" name="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" required><button class="btn btn-secondary" type="submit">Upload Other File</button><div class="form-error" id="otherError"></div></form>
+            <div><span class="eyebrow">OPTIONAL</span><h2>Other Files</h2><p>Select the date associated with the file and upload additional documents or images whenever needed.</p></div>
+            <form id="otherUploadForm"><label class="upload-date-label" for="otherDocumentDate">File date</label><input id="otherDocumentDate" name="documentDate" type="date" required><input type="file" name="file" accept="image/*,.pdf,.xlsx,.xls,.doc,.docx" required><button class="btn btn-secondary" type="submit">Upload Other File</button><div class="form-error" id="otherError"></div></form>
           </div>
 
           <div id="adminHome" class="hidden">

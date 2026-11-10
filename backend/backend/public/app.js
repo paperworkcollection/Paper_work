@@ -341,11 +341,17 @@ function attachUploadForm(form, kind, errorId) {
     event.preventDefault();
     const file = form.elements.file?.files?.[0];
     if (!file) return;
+    const dateInput = form.elements.documentDate;
+    const selectedDate = dateInput?.value;
+    if (!selectedDate) {
+      const error = $('#' + errorId);
+      if (error) error.textContent = 'Please select a date for this upload.';
+      return;
+    }
     const data = new FormData();
     data.append('file', file);
     data.append('kind', kind);
-    const now = new Date();
-    data.append('documentDate', [now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-'));
+    data.append('documentDate', selectedDate);
     const button = form.querySelector('button');
     const error = $('#' + errorId);
     button.disabled = true;
